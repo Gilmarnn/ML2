@@ -20,25 +20,48 @@ function scoreClass(score) {
   return 'score-bad';
 }
 
-async function loadItems() {
+let loadedItems = [];
+let currentOffset = 0;
+let totalItems = null;
+
+async function loadItems(isFirstPage = true) {
   const statusEl = document.getElementById('items-status');
   const table = document.getElementById('items-table');
   const tbody = document.getElementById('items-tbody');
+  const loadMoreWrap = document.getElementById('load-more-wrap');
+  const loadMoreBtn = document.getElementById('load-more-btn');
+  const loadMoreCount = document.getElementById('load-more-count');
+
+  if (isFirstPage) {
+    statusEl.hidden = false;
+    statusEl.textContent = 'Carregando anúncios…';
+    table.hidden = true;
+    loadMoreWrap.hidden = true;
+    loadedItems = [];
+    currentOffset = 0;
+  } else {
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = 'Carregando…';
+  }
 
   try {
-    const res = await fetch('/api/items');
+    const res = await fetch(`/api/items?offset=${currentOffset}&limit=30`);
     if (res.status === 401) {
       window.location.href = '/';
       return;
     }
     const data = await res.json();
+    totalItems = data.total;
 
-    if (!data.items || data.items.length === 0) {
+    if (isFirstPage && (!data.items || data.items.length === 0)) {
       statusEl.textContent = 'Nenhum anúncio encontrado nesta conta.';
       return;
     }
 
-    tbody.innerHTML = data.items
+    loadedItems = loadedItems.concat(data.items);
+    currentOffset += data.items.length;
+
+    const rowsHtml = data.items
       .map(
         (item) => `
         <tr>
@@ -52,17 +75,33 @@ async function loadItems() {
       )
       .join('');
 
-    tbody.querySelectorAll('button[data-id]').forEach((btn) => {
-      btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, data.items));
+    tbody.insertAdjacentHTML('beforeend', rowsHtml);
+
+    tbody.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
     });
 
     statusEl.hidden = true;
     table.hidden = false;
+
+    const remaining = totalItems - currentOffset;
+    if (remaining > 0) {
+      loadMoreWrap.hidden = false;
+      loadMoreCount.textContent = `Mostrando ${currentOffset} de ${totalItems} anúncios.`;
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = 'Carregar mais anúncios';
+    } else {
+      loadMoreWrap.hidden = true;
+    }
   } catch (err) {
+    statusEl.hidden = false;
     statusEl.textContent = 'Erro ao carregar anúncios. Veja o console para detalhes.';
     console.error(err);
   }
 }
+
+document.getElementById('load-more-btn').addEventListener('click', () => loadItems(false));
 
 function openDiagnosis(itemId, items) {
   const item = items.find((i) => i.id === itemId);
