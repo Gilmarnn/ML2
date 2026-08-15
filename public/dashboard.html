@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard — Diagnóstico ML</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Diagnóstico ML</span>
+    <nav>
+      <button id="tab-items" class="tab active">Anúncios</button>
+      <button id="tab-calc" class="tab">Calculadora de margem</button>
+    </nav>
+  </header>
+
+  <main class="dashboard">
+    <section id="panel-items">
+      <div id="items-status" class="status">Carregando anúncios…</div>
+      <table id="items-table" class="items-table" hidden>
+        <thead>
+          <tr>
+            <th>Anúncio</th>
+            <th>Preço</th>
+            <th>Estoque</th>
+            <th>Visitas (30d)</th>
+            <th>Score</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-tbody"></tbody>
+      </table>
+    </section>
+
+    <section id="panel-calc" hidden>
+      <form id="calc-form" class="calc-form">
+        <h2>Calculadora de margem</h2>
+        <label>Preço de venda (R$)<input type="number" step="0.01" name="price" required /></label>
+        <label>Custo do produto (R$)<input type="number" step="0.01" name="productCost" required /></label>
+        <label>Comissão do ML (%)<input type="number" step="0.01" name="mlCommissionPercent" required /></label>
+        <label>Frete que você paga (R$)<input type="number" step="0.01" name="shippingCost" value="0" /></label>
+        <label>Tarifa fixa (R$)<input type="number" step="0.01" name="fixedFee" value="0" /></label>
+        <label>Imposto sobre a venda (%)<input type="number" step="0.01" name="taxPercent" value="0" /></label>
+        <label>Custo de Ads (%)<input type="number" step="0.01" name="adsCostPercent" value="0" /></label>
+        <button type="submit" class="btn-primary">Calcular</button>
+      </form>
+      <div id="calc-result" class="calc-result"></div>
+    </section>
+  </main>
+
+  <div id="diagnosis-modal" class="modal" hidden>
+    <div class="modal-content">
+      <button id="modal-close" class="modal-close">&times;</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
