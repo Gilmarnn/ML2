@@ -9,12 +9,6 @@ const router = express.Router();
 const MAX_ITEMS_PER_PAGE = 30;
 const CONCURRENCY = 4;
 
-/**
- * Roda uma função assíncrona sobre uma lista, mas no máximo `concurrency`
- * chamadas em paralelo por vez — em vez de disparar tudo de uma vez com
- * Promise.all(items.map(...)), que trava o navegador e estoura limite de
- * chamadas simultâneas na API do Mercado Livre quando há muitos anúncios.
- */
 async function mapWithConcurrency(items, concurrency, fn) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -31,10 +25,6 @@ async function mapWithConcurrency(items, concurrency, fn) {
   return results;
 }
 
-// Lista os anúncios do usuário logado, já com visitas dos últimos 30 dias
-// e diagnóstico calculado. Suporta paginação via ?offset=&limit= (limit máximo
-// de 30 por página) e processa no máximo 4 anúncios em paralelo por vez —
-// contas com 100+ anúncios travavam o navegador antes dessa mudança.
 router.get('/items', requireAuth, async (req, res) => {
   try {
     const { access_token, user_id } = req.session.ml;
@@ -55,7 +45,6 @@ router.get('/items', requireAuth, async (req, res) => {
       try {
         visits = await mlClient.getItemVisits(item.id, access_token, 30);
       } catch (e) {
-        // Alguns tipos de anúncio/categoria não retornam visitas — não deve derrubar a lista toda
         visits = null;
       }
       const diagnosis = await diagnoseItem(item, visits);
@@ -91,7 +80,6 @@ router.get('/items/:id/diagnosis', requireAuth, async (req, res) => {
   }
 });
 
-// Calculadora não depende de estar logado — é matemática pura, sem chamada ao ML.
 router.post('/calculator', (req, res) => {
   try {
     const result = calculateMargin(req.body);
