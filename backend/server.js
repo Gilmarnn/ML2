@@ -8,7 +8,6 @@ const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.set('trust proxy', 1);
 
 // Validação básica de configuração — falha rápido e com mensagem clara
 // em vez de deixar o app subir "quebrado" silenciosamente.
@@ -21,6 +20,12 @@ if (missing.length > 0) {
   );
   process.exit(1);
 }
+
+// Necessário porque o Railway (e a maioria dos PaaS) fica atrás de um proxy
+// reverso que termina o HTTPS antes de chegar no app. Sem isso, o Express não
+// reconhece a conexão como segura e o cookie de sessão (secure: true) não é
+// salvo — o usuário fica sendo jogado de volta pra tela de login sempre.
+app.set('trust proxy', 1);
 
 app.use(express.json());
 app.use(
@@ -47,4 +52,3 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(PORT, () => {
   console.log(`[server] Rodando em http://localhost:${PORT}`);
 });
-ix: trust proxy pro Railway
