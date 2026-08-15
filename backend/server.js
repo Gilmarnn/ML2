@@ -8,6 +8,7 @@ const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', 1);
 
 // Validação básica de configuração — falha rápido e com mensagem clara
 // em vez de deixar o app subir "quebrado" silenciosamente.
@@ -46,3 +47,4 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(PORT, () => {
   console.log(`[server] Rodando em http://localhost:${PORT}`);
 });
+ix: trust proxy pro Railway
