@@ -189,6 +189,13 @@ body {
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 
+/* Garante que o atributo "hidden" sempre vença sobre a regra acima —
+   sem isso, o modal fica visível (e bloqueando cliques na tela inteira)
+   mesmo quando deveria estar escondido. */
+.modal[hidden] {
+  display: none;
+}
+
 .modal-content {
   background: var(--panel);
   border: 1px solid var(--panel-border);
