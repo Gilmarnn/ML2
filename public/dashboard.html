@@ -18,21 +18,9 @@
   <main class="dashboard">
     <section id="panel-items">
       <div id="items-status" class="status">Carregando anúncios…</div>
-      <table id="items-table" class="items-table" hidden>
-        <thead>
-          <tr>
-            <th>Anúncio</th>
-            <th>Preço</th>
-            <th>Estoque</th>
-            <th>Visitas (30d)</th>
-            <th>Score</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="items-tbody"></tbody>
-      </table>
+      <div id="items-grid" class="items-grid" hidden></div>
       <div id="load-more-wrap" style="text-align:center;margin-top:16px" hidden>
-        <button id="load-more-btn" class="link-btn">Carregar mais anúncios</button>
+        <button id="load-more-btn" class="link-btn" style="width:auto;padding:10px 24px">Carregar mais anúncios</button>
         <p id="load-more-count" style="color:var(--text-dim);font-size:13px;margin-top:8px"></p>
       </div>
     </section>
