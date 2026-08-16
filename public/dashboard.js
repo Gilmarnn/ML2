@@ -20,14 +20,26 @@ function scoreClass(score) {
   return 'score-bad';
 }
 
+// Ícones inline (sem dependência externa) usados nos cards.
+const ICONS = {
+  box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>'
+};
+
+function fixThumb(url) {
+  // A API do ML às vezes devolve o thumbnail em http:// puro, o que o navegador
+  // bloqueia como conteúdo misto numa página https. Forçamos https aqui.
+  if (!url) return '';
+  return url.replace(/^http:\/\//, 'https://');
+}
+
 let loadedItems = [];
 let currentOffset = 0;
 let totalItems = null;
 
 async function loadItems(isFirstPage = true) {
   const statusEl = document.getElementById('items-status');
-  const table = document.getElementById('items-table');
-  const tbody = document.getElementById('items-tbody');
+  const grid = document.getElementById('items-grid');
   const loadMoreWrap = document.getElementById('load-more-wrap');
   const loadMoreBtn = document.getElementById('load-more-btn');
   const loadMoreCount = document.getElementById('load-more-count');
@@ -35,7 +47,8 @@ async function loadItems(isFirstPage = true) {
   if (isFirstPage) {
     statusEl.hidden = false;
     statusEl.textContent = 'Carregando anúncios…';
-    table.hidden = true;
+    grid.hidden = true;
+    grid.innerHTML = '';
     loadMoreWrap.hidden = true;
     loadedItems = [];
     currentOffset = 0;
@@ -61,29 +74,41 @@ async function loadItems(isFirstPage = true) {
     loadedItems = loadedItems.concat(data.items);
     currentOffset += data.items.length;
 
-    const rowsHtml = data.items
-      .map(
-        (item) => `
-        <tr>
-          <td>${escapeHtml(item.title)}</td>
-          <td>R$ ${Number(item.price).toFixed(2)}</td>
-          <td>${item.available_quantity}</td>
-          <td>${item.visits ?? '—'}</td>
-          <td><span class="score-pill ${scoreClass(item.diagnosis.score)}">${item.diagnosis.score}</span></td>
-          <td><button class="link-btn" data-id="${item.id}">Ver diagnóstico</button></td>
-        </tr>`
-      )
+    const cardsHtml = data.items
+      .map((item) => {
+        const stockZero = item.available_quantity === 0;
+        const visitsZero = (item.visits ?? 0) === 0;
+        const thumb = fixThumb(item.thumbnail);
+        return `
+        <article class="item-card">
+          <div class="item-card-thumb">
+            ${thumb ? `<img src="${thumb}" alt="" loading="lazy" />` : ''}
+            <span class="item-card-score score-pill ${scoreClass(item.diagnosis.score)}">${item.diagnosis.score}</span>
+          </div>
+          <div class="item-card-body">
+            <div class="item-card-title">${escapeHtml(item.title)}</div>
+            <div class="item-card-price">R$ ${Number(item.price).toFixed(2)}</div>
+            <div class="item-card-stats">
+              <span class="item-card-stat ${stockZero ? 'stat-zero' : ''}" title="Estoque">${ICONS.box} ${item.available_quantity}</span>
+              <span class="item-card-stat ${visitsZero ? 'stat-zero' : ''}" title="Visitas em 30 dias">${ICONS.eye} ${item.visits ?? '—'}</span>
+            </div>
+            <div class="item-card-footer">
+              <button class="link-btn" data-id="${item.id}">Ver diagnóstico</button>
+            </div>
+          </div>
+        </article>`;
+      })
       .join('');
 
-    tbody.insertAdjacentHTML('beforeend', rowsHtml);
+    grid.insertAdjacentHTML('beforeend', cardsHtml);
 
-    tbody.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
+    grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
     });
 
     statusEl.hidden = true;
-    table.hidden = false;
+    grid.hidden = false;
 
     const remaining = totalItems - currentOffset;
     if (remaining > 0) {
