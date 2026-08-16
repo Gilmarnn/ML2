@@ -17,6 +17,11 @@
 
   <main class="dashboard">
     <section id="panel-items">
+      <div class="settings-bar">
+        <label>Comissão ML (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
+        <label>Imposto (%)<input type="number" id="global-tax" step="0.1" value="0" /></label>
+        <span class="settings-hint">Esses valores são usados para calcular o lucro estimado em cada anúncio abaixo. Informe o custo de cada produto no próprio card.</span>
+      </div>
       <div id="items-status" class="status">Carregando anúncios…</div>
       <div id="items-grid" class="items-grid" hidden></div>
       <div id="load-more-wrap" style="text-align:center;margin-top:16px" hidden>
