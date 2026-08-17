@@ -11,40 +11,84 @@
     <span class="brand">Diagnóstico<span class="accent">ML</span></span>
     <nav>
       <button id="tab-items" class="tab active">Anúncios</button>
+      <button id="tab-explore" class="tab">Explorar categorias</button>
       <button id="tab-calc" class="tab">Calculadora de margem</button>
     </nav>
   </header>
 
-  <main class="dashboard">
-    <section id="panel-items">
-      <div class="settings-bar">
-        <label>Comissão ML (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
-        <label>Imposto (%)<input type="number" id="global-tax" step="0.1" value="0" /></label>
-        <span class="settings-hint">Esses valores são usados para calcular o lucro estimado em cada anúncio abaixo. Informe o custo de cada produto no próprio card.</span>
-      </div>
-      <div id="items-status" class="status">Carregando anúncios…</div>
-      <div id="items-grid" class="items-grid" hidden></div>
-      <div id="load-more-wrap" style="text-align:center;margin-top:16px" hidden>
-        <button id="load-more-btn" class="link-btn" style="width:auto;padding:10px 24px">Carregar mais anúncios</button>
-        <p id="load-more-count" style="color:var(--text-dim);font-size:13px;margin-top:8px"></p>
-      </div>
-    </section>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-title">Categorias</div>
+      <nav id="category-list" class="category-list">
+        <button class="category-item active" data-category="">
+          <span>Todos os anúncios</span>
+        </button>
+      </nav>
+    </aside>
 
-    <section id="panel-calc" hidden>
-      <form id="calc-form" class="calc-form">
-        <h2>Calculadora de margem</h2>
-        <label>Preço de venda (R$)<input type="number" step="0.01" name="price" required /></label>
-        <label>Custo do produto (R$)<input type="number" step="0.01" name="productCost" required /></label>
-        <label>Comissão do ML (%)<input type="number" step="0.01" name="mlCommissionPercent" required /></label>
-        <label>Frete que você paga (R$)<input type="number" step="0.01" name="shippingCost" value="0" /></label>
-        <label>Tarifa fixa (R$)<input type="number" step="0.01" name="fixedFee" value="0" /></label>
-        <label>Imposto sobre a venda (%)<input type="number" step="0.01" name="taxPercent" value="0" /></label>
-        <label>Custo de Ads (%)<input type="number" step="0.01" name="adsCostPercent" value="0" /></label>
-        <button type="submit" class="btn-primary">Calcular</button>
-      </form>
-      <div id="calc-result" class="calc-result"></div>
-    </section>
-  </main>
+    <main class="dashboard">
+      <section id="panel-items">
+        <div class="settings-bar">
+          <label>Comissão ML (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
+          <label>Imposto (%)<input type="number" id="global-tax" step="0.1" value="0" /></label>
+          <span class="settings-hint">Esses valores são usados para calcular o lucro estimado em cada anúncio abaixo. Informe o custo de cada produto no próprio card.</span>
+        </div>
+
+        <div class="filter-bar">
+          <label>Estoque
+            <select id="filter-stock">
+              <option value="">Todos</option>
+              <option value="zero">Zerado</option>
+              <option value="available">Disponível</option>
+            </select>
+          </label>
+          <label>Tipo de anúncio
+            <select id="filter-listing-type">
+              <option value="">Todos</option>
+              <option value="classic">Clássico</option>
+              <option value="premium">Premium</option>
+            </select>
+          </label>
+          <label>Ordenar por
+            <select id="filter-sort">
+              <option value="">Padrão</option>
+              <option value="most_sold">Mais vendidos primeiro</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="items-status" class="status">Carregando anúncios…</div>
+        <div id="items-grid" class="items-grid" hidden></div>
+        <div id="load-more-wrap" style="text-align:center;margin-top:16px" hidden>
+          <button id="load-more-btn" class="link-btn" style="width:auto;padding:10px 24px">Carregar mais anúncios</button>
+          <p id="load-more-count" style="color:var(--text-dim);font-size:13px;margin-top:8px"></p>
+        </div>
+      </section>
+
+      <section id="panel-explore" hidden>
+        <h2 style="font-size:24px;margin-bottom:14px">Explorar categorias do Mercado Livre</h2>
+        <div id="explore-breadcrumb" class="explore-breadcrumb"></div>
+        <div id="explore-current" class="explore-current" hidden></div>
+        <div id="explore-status" class="status">Carregando categorias…</div>
+        <div id="explore-grid" class="explore-grid" hidden></div>
+      </section>
+
+      <section id="panel-calc" hidden>
+        <form id="calc-form" class="calc-form">
+          <h2>Calculadora de margem</h2>
+          <label>Preço de venda (R$)<input type="number" step="0.01" name="price" required /></label>
+          <label>Custo do produto (R$)<input type="number" step="0.01" name="productCost" required /></label>
+          <label>Comissão do ML (%)<input type="number" step="0.01" name="mlCommissionPercent" required /></label>
+          <label>Frete que você paga (R$)<input type="number" step="0.01" name="shippingCost" value="0" /></label>
+          <label>Tarifa fixa (R$)<input type="number" step="0.01" name="fixedFee" value="0" /></label>
+          <label>Imposto sobre a venda (%)<input type="number" step="0.01" name="taxPercent" value="0" /></label>
+          <label>Custo de Ads (%)<input type="number" step="0.01" name="adsCostPercent" value="0" /></label>
+          <button type="submit" class="btn-primary">Calcular</button>
+        </form>
+        <div id="calc-result" class="calc-result"></div>
+      </section>
+    </main>
+  </div>
 
   <div id="diagnosis-modal" class="modal" hidden>
     <div class="modal-content">
