@@ -1,17 +1,26 @@
 const tabItems = document.getElementById('tab-items');
+const tabExplore = document.getElementById('tab-explore');
 const tabCalc = document.getElementById('tab-calc');
 const panelItems = document.getElementById('panel-items');
+const panelExplore = document.getElementById('panel-explore');
 const panelCalc = document.getElementById('panel-calc');
 
 tabItems.addEventListener('click', () => switchTab('items'));
+tabExplore.addEventListener('click', () => switchTab('explore'));
 tabCalc.addEventListener('click', () => switchTab('calc'));
 
 function switchTab(tab) {
-  const isItems = tab === 'items';
-  panelItems.hidden = !isItems;
-  panelCalc.hidden = isItems;
-  tabItems.classList.toggle('active', isItems);
-  tabCalc.classList.toggle('active', !isItems);
+  panelItems.hidden = tab !== 'items';
+  panelExplore.hidden = tab !== 'explore';
+  panelCalc.hidden = tab !== 'calc';
+  tabItems.classList.toggle('active', tab === 'items');
+  tabExplore.classList.toggle('active', tab === 'explore');
+  tabCalc.classList.toggle('active', tab === 'calc');
+
+  if (tab === 'explore' && !exploreLoadedOnce) {
+    exploreLoadedOnce = true;
+    loadExploreCategories(null);
+  }
 }
 
 function scoreClass(score) {
@@ -121,6 +130,69 @@ document.getElementById('global-tax').addEventListener('input', onGlobalSettings
 let loadedItems = [];
 let currentOffset = 0;
 let totalItems = null;
+const activeFilters = { category: '', stock: '', listingType: '', sortBy: '' };
+
+function buildQueryString(offset) {
+  const params = new URLSearchParams({ offset: String(offset), limit: '30' });
+  if (activeFilters.category) params.set('category', activeFilters.category);
+  if (activeFilters.stock) params.set('stock', activeFilters.stock);
+  if (activeFilters.listingType) params.set('listingType', activeFilters.listingType);
+  if (activeFilters.sortBy) params.set('sortBy', activeFilters.sortBy);
+  return params.toString();
+}
+
+async function loadCategories() {
+  try {
+    const res = await fetch('/api/categories');
+    if (res.status === 401) return;
+    const data = await res.json();
+    const list = document.getElementById('category-list');
+
+    const itemsHtml = data.categories
+      .map(
+        (cat) => `
+        <button class="category-item" data-category="${cat.id}">
+          <span>
+            <span title="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</span>
+            ${cat.marketSize !== null ? `<span class="sidebar-market-size">${formatNumber(cat.marketSize)} no ML</span>` : ''}
+          </span>
+          <span class="count">${cat.count}</span>
+        </button>`
+      )
+      .join('');
+
+    list.insertAdjacentHTML('beforeend', itemsHtml);
+    list.querySelector('.category-item[data-category=""]').querySelector('.count')?.remove();
+    const allCountSpan = document.createElement('span');
+    allCountSpan.className = 'count';
+    allCountSpan.textContent = data.total;
+    list.querySelector('.category-item[data-category=""]').appendChild(allCountSpan);
+
+    list.querySelectorAll('.category-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        list.querySelectorAll('.category-item').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilters.category = btn.dataset.category;
+        loadItems(true);
+      });
+    });
+  } catch (err) {
+    console.error('Erro ao carregar categorias', err);
+  }
+}
+
+document.getElementById('filter-stock').addEventListener('change', (e) => {
+  activeFilters.stock = e.target.value;
+  loadItems(true);
+});
+document.getElementById('filter-listing-type').addEventListener('change', (e) => {
+  activeFilters.listingType = e.target.value;
+  loadItems(true);
+});
+document.getElementById('filter-sort').addEventListener('change', (e) => {
+  activeFilters.sortBy = e.target.value;
+  loadItems(true);
+});
 
 async function loadItems(isFirstPage = true) {
   const statusEl = document.getElementById('items-status');
@@ -143,7 +215,7 @@ async function loadItems(isFirstPage = true) {
   }
 
   try {
-    const res = await fetch(`/api/items?offset=${currentOffset}&limit=30`);
+    const res = await fetch(`/api/items?${buildQueryString(currentOffset)}`);
     if (res.status === 401) {
       window.location.href = '/';
       return;
@@ -311,3 +383,92 @@ function escapeHtml(str) {
 }
 
 loadItems();
+loadCategories();
+
+// ---------- Explorador de categorias do Mercado Livre ----------
+
+let exploreLoadedOnce = false;
+let exploreHistory = []; // pilha de ids visitados, para o breadcrumb clicável
+
+function formatNumber(n) {
+  if (n === null || n === undefined) return '—';
+  return Number(n).toLocaleString('pt-BR');
+}
+
+function representationClass(repr) {
+  if (repr === null) return 'repr-low';
+  if (repr >= 40) return 'repr-high';
+  if (repr >= 15) return 'repr-mid';
+  return 'repr-low';
+}
+
+async function loadExploreCategories(parentId) {
+  const statusEl = document.getElementById('explore-status');
+  const gridEl = document.getElementById('explore-grid');
+  const currentEl = document.getElementById('explore-current');
+  const breadcrumbEl = document.getElementById('explore-breadcrumb');
+
+  statusEl.hidden = false;
+  statusEl.textContent = 'Carregando categorias…';
+  gridEl.hidden = true;
+  currentEl.hidden = true;
+
+  try {
+    const url = parentId ? `/api/explore/categories?parent=${encodeURIComponent(parentId)}` : '/api/explore/categories';
+    const res = await fetch(url);
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    // Breadcrumb
+    if (data.breadcrumb && data.breadcrumb.length > 0) {
+      const crumbs = [`<button data-parent="">Início</button>`]
+        .concat(data.breadcrumb.map((c) => `<button data-parent="${c.id}">${escapeHtml(c.name)}</button>`));
+      breadcrumbEl.innerHTML = crumbs.join('<span class="sep">/</span>');
+      breadcrumbEl.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => loadExploreCategories(btn.dataset.parent || null));
+      });
+    } else {
+      breadcrumbEl.innerHTML = '';
+    }
+
+    // Card da categoria atual
+    if (data.current) {
+      currentEl.hidden = false;
+      currentEl.innerHTML = `
+        <h3>${escapeHtml(data.current.name)}</h3>
+        <span class="market-size"><strong>${formatNumber(data.current.total)}</strong> produtos cadastrados nessa categoria no Mercado Livre</span>
+      `;
+    }
+
+    if (!data.children || data.children.length === 0) {
+      statusEl.hidden = false;
+      statusEl.textContent = 'Essa categoria não tem subcategorias — chegou no nível mais específico.';
+      return;
+    }
+
+    gridEl.innerHTML = data.children
+      .map(
+        (cat) => `
+        <button class="explore-card" data-id="${cat.id}">
+          <span class="cat-name">${escapeHtml(cat.name)}</span>
+          <span class="cat-total">${formatNumber(cat.total)} produtos</span>
+          ${cat.representation !== null ? `<span class="cat-representation ${representationClass(cat.representation)}">${cat.representation}%</span>` : ''}
+        </button>`
+      )
+      .join('');
+
+    gridEl.querySelectorAll('.explore-card').forEach((card) => {
+      card.addEventListener('click', () => loadExploreCategories(card.dataset.id));
+    });
+
+    statusEl.hidden = true;
+    gridEl.hidden = false;
+  } catch (err) {
+    statusEl.hidden = false;
+    statusEl.textContent = 'Erro ao carregar categorias. Veja o console para detalhes.';
+    console.error(err);
+  }
+}
