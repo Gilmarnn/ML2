@@ -34,7 +34,8 @@ const ICONS = {
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>',
-  truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62L18.3 8.38A1 1 0 0 0 17.52 8H14"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>'
+  truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62L18.3 8.38A1 1 0 0 0 17.52 8H14"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>',
+  sparkles: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 4.9L5 10l5.1 2.1L12 17l1.9-4.9L19 10l-5.1-2.1Z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M19 17v4"/><path d="M17 19h4"/></svg>'
 };
 
 function fixThumb(url) {
@@ -251,6 +252,7 @@ async function loadItems(isFirstPage = true) {
             ${thumb ? `<img src="${thumb}" alt="" loading="lazy" />` : ''}
             ${badgesHtml}
             <span class="item-card-score score-pill ${scoreClass(item.diagnosis.score)}">${item.diagnosis.score}</span>
+            <button class="ai-btn" data-ai-id="${item.id}" title="Análise profunda com IA">${ICONS.sparkles} IA</button>
           </div>
           <div class="item-card-body">
             <div class="item-card-title">${escapeHtml(item.title)}</div>
@@ -278,6 +280,14 @@ async function loadItems(isFirstPage = true) {
     grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
+    });
+
+    grid.querySelectorAll('.ai-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openAIAnalysis(btn.dataset.aiId);
+      });
     });
 
     grid.querySelectorAll('.item-cost-input:not([data-bound])').forEach((input) => {
@@ -338,6 +348,51 @@ function openDiagnosis(itemId, items) {
     ${aiHtml}
   `;
   modal.hidden = false;
+}
+
+async function openAIAnalysis(itemId) {
+  const modal = document.getElementById('diagnosis-modal');
+  const body = document.getElementById('modal-body');
+
+  body.innerHTML = `
+    <h2>Análise profunda com IA</h2>
+    <p style="color:var(--text-dim);font-size:14px">Buscando concorrentes e analisando o anúncio (pode levar alguns segundos)…</p>
+  `;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/items/${itemId}/deep-analysis`);
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    if (data.error) {
+      body.innerHTML = `
+        <h2>Análise profunda com IA</h2>
+        <p class="check-critico">${escapeHtml(data.error)}</p>
+      `;
+      return;
+    }
+
+    const comp = data.competitorData;
+    const compHtml = comp && comp.competitors.length > 0
+      ? `<div class="check-row check-info">Comparado com ${comp.competitors.length} concorrentes: preço médio R$ ${comp.avgPrice}, ${comp.avgPictures} fotos em média, ${comp.freeShippingRate}% com frete grátis.</div>`
+      : `<div class="check-row check-alerta">Não foi possível encontrar concorrentes comparáveis para essa categoria.</div>`;
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.title)}</h2>
+      ${compHtml}
+      <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;margin-top:12px">${escapeHtml(data.analysis || '')}</div>
+    `;
+  } catch (err) {
+    body.innerHTML = `
+      <h2>Análise profunda com IA</h2>
+      <p class="check-critico">Erro ao gerar análise. Veja o console para detalhes.</p>
+    `;
+    console.error(err);
+  }
 }
 
 document.getElementById('modal-close').addEventListener('click', () => {
@@ -421,6 +476,13 @@ async function loadExploreCategories(parentId) {
       return;
     }
     const data = await res.json();
+
+    if (!res.ok) {
+      statusEl.hidden = false;
+      statusEl.textContent = data.error || `Erro ao carregar categorias (status ${res.status}). Veja o console para detalhes.`;
+      console.error('Erro na API de explorar categorias:', data);
+      return;
+    }
 
     // Breadcrumb
     if (data.breadcrumb && data.breadcrumb.length > 0) {
