@@ -5,13 +5,14 @@ const session = require('express-session');
 
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
+const adminAuthRoutes = require('./routes/adminAuth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Validação básica de configuração — falha rápido e com mensagem clara
 // em vez de deixar o app subir "quebrado" silenciosamente.
-const requiredEnvVars = ['ML_CLIENT_ID', 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'SESSION_SECRET'];
+const requiredEnvVars = ['ML_CLIENT_ID', 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'SESSION_SECRET', 'ADMIN_USERNAME', 'ADMIN_PASSWORD'];
 const missing = requiredEnvVars.filter((key) => !process.env[key]);
 if (missing.length > 0) {
   console.error(
@@ -41,6 +42,22 @@ app.use(
     }
   })
 );
+
+// Rota de login em si (não pode ficar atrás do próprio gate, senão ninguém
+// consegue logar). Tudo mais abaixo dela passa pelo bloqueio.
+app.use('/admin', adminAuthRoutes);
+
+// Bloqueia acesso a QUALQUER outra rota (páginas, /auth do Mercado Livre,
+// /api) até o usuário logar com usuário/senha configurados no servidor.
+const PUBLIC_PATHS = new Set(['/login.html', '/login.js', '/style.css']);
+app.use((req, res, next) => {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+  if (req.session.isAdmin) return next();
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Login necessário.' });
+  }
+  return res.redirect('/login.html');
+});
 
 app.use('/auth', authRoutes);
 app.use('/api', apiRoutes);
