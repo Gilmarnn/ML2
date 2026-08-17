@@ -3,6 +3,8 @@ const { requireAuth } = require('./auth');
 const mlClient = require('../services/mlClient');
 const { diagnoseItem } = require('../services/diagnostics');
 const { calculateMargin } = require('../services/costCalculator');
+const { searchCompetitors } = require('../services/competitorSearch');
+const { deepAnalysis } = require('../services/aiAnalysis');
 
 const router = express.Router();
 
@@ -226,6 +228,42 @@ router.post('/calculator', (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Análise profunda de um anúncio específico: busca a descrição completa,
+// procura concorrentes reais na mesma categoria, e manda tudo (com a foto
+// principal) pra API da Anthropic pedir sugestões de título, descrição,
+// preço e foto — focadas em conversão.
+router.get('/items/:id/deep-analysis', requireAuth, async (req, res) => {
+  try {
+    const { access_token } = req.session.ml;
+    const [item] = await mlClient.getItemsDetails([req.params.id], access_token);
+
+    if (!item) {
+      return res.status(404).json({ error: 'Anúncio não encontrado.' });
+    }
+
+    item.plainDescription = await mlClient.getItemDescription(req.params.id, access_token);
+
+    const competitorData = await searchCompetitors(item.category_id, item.title, item.id).catch(() => ({
+      competitors: [],
+      avgPrice: null,
+      avgPictures: null,
+      freeShippingRate: null
+    }));
+
+    const result = await deepAnalysis({ item, competitorData });
+
+    res.json({
+      itemId: item.id,
+      title: item.title,
+      competitorData,
+      ...result
+    });
+  } catch (err) {
+    console.error('[api/items/:id/deep-analysis]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao gerar análise profunda do anúncio.' });
   }
 });
 
