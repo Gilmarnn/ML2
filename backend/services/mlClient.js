@@ -138,10 +138,25 @@ async function getSiteCategories() {
   return siteCategoriesCache;
 }
 
+/**
+ * Descrição em texto do anúncio — vem de um endpoint separado na API do ML,
+ * não junto com os detalhes principais do item.
+ */
+async function getItemDescription(itemId, accessToken) {
+  const api = client(accessToken);
+  try {
+    const { data } = await api.get(`/items/${itemId}/description`);
+    return data.plain_text || '';
+  } catch (e) {
+    return '';
+  }
+}
+
 module.exports = {
   getUserItemIds,
   getItemsDetails,
   getItemsLight,
+  getItemDescription,
   getCategoryName,
   getCategoryDetail,
   getSiteCategories,
