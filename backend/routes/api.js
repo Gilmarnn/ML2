@@ -8,6 +8,7 @@ const router = express.Router();
 
 const MAX_ITEMS_PER_PAGE = 30;
 const CONCURRENCY = 4;
+const LIGHT_INDEX_TTL_MS = 10 * 60 * 1000; // 10 minutos
 
 /**
  * Roda uma função assíncrona sobre uma lista, mas no máximo `concurrency`
@@ -31,22 +32,66 @@ async function mapWithConcurrency(items, concurrency, fn) {
   return results;
 }
 
+/**
+ * Busca (ou reaproveita do cache da sessão) a lista "leve" de todos os anúncios
+ * do usuário — só os campos usados para filtrar/ordenar/montar a barra de
+ * categorias. Evita rebuscar isso a cada mudança de filtro.
+ */
+async function getLightIndex(req) {
+  const { access_token, user_id } = req.session.ml;
+  const cached = req.session.ml.lightIndex;
+  if (cached && Date.now() - cached.fetchedAt < LIGHT_INDEX_TTL_MS) {
+    return cached.items;
+  }
+
+  const ids = await mlClient.getUserItemIds(user_id, access_token);
+  const items = ids.length > 0 ? await mlClient.getItemsLight(ids, access_token) : [];
+  req.session.ml.lightIndex = { items, fetchedAt: Date.now() };
+  return items;
+}
+
+function applyFilters(items, query) {
+  let filtered = items;
+
+  if (query.category) {
+    filtered = filtered.filter((i) => i.category_id === query.category);
+  }
+
+  if (query.stock === 'zero') {
+    filtered = filtered.filter((i) => i.available_quantity === 0);
+  } else if (query.stock === 'available') {
+    filtered = filtered.filter((i) => i.available_quantity > 0);
+  }
+
+  if (query.listingType === 'premium') {
+    filtered = filtered.filter((i) => i.listing_type_id === 'gold_pro' || i.listing_type_id === 'gold_premium');
+  } else if (query.listingType === 'classic') {
+    filtered = filtered.filter((i) => i.listing_type_id === 'gold_special' || i.listing_type_id === 'silver' || i.listing_type_id === 'bronze');
+  }
+
+  if (query.sortBy === 'most_sold') {
+    filtered = [...filtered].sort((a, b) => (b.sold_quantity || 0) - (a.sold_quantity || 0));
+  }
+
+  return filtered;
+}
+
 // Lista os anúncios do usuário logado, já com visitas dos últimos 30 dias
-// e diagnóstico calculado. Suporta paginação via ?offset=&limit= (limit máximo
-// de 30 por página) e processa no máximo 4 anúncios em paralelo por vez —
-// contas com 100+ anúncios travavam o navegador antes dessa mudança.
+// e diagnóstico calculado. Suporta paginação via ?offset=&limit=, e filtros
+// via ?category=&stock=zero|available&listingType=classic|premium&sortBy=most_sold.
 router.get('/items', requireAuth, async (req, res) => {
   try {
-    const { access_token, user_id } = req.session.ml;
-    const ids = await mlClient.getUserItemIds(user_id, access_token);
+    const { access_token } = req.session.ml;
+    const lightIndex = await getLightIndex(req);
+    const filtered = applyFilters(lightIndex, req.query);
 
-    if (ids.length === 0) {
+    if (filtered.length === 0) {
       return res.json({ items: [], total: 0, offset: 0, limit: MAX_ITEMS_PER_PAGE });
     }
 
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     const limit = Math.min(MAX_ITEMS_PER_PAGE, parseInt(req.query.limit, 10) || MAX_ITEMS_PER_PAGE);
-    const pageIds = ids.slice(offset, offset + limit);
+    const pageIds = filtered.slice(offset, offset + limit).map((i) => i.id);
 
     const items = await mlClient.getItemsDetails(pageIds, access_token);
 
@@ -74,10 +119,90 @@ router.get('/items', requireAuth, async (req, res) => {
       };
     });
 
-    res.json({ items: enriched, total: ids.length, offset, limit });
+    res.json({ items: enriched, total: filtered.length, offset, limit });
   } catch (err) {
     console.error('[api/items]', err.response?.data || err.message);
     res.status(500).json({ error: 'Falha ao buscar anúncios do Mercado Livre.' });
+  }
+});
+
+// Lista as categorias presentes nos anúncios do usuário, com contagem e o
+// tamanho de mercado (total de produtos cadastrados nessa categoria em todo
+// o Mercado Livre) — usada para montar o menu lateral de navegação.
+router.get('/categories', requireAuth, async (req, res) => {
+  try {
+    const lightIndex = await getLightIndex(req);
+
+    const counts = new Map();
+    for (const item of lightIndex) {
+      counts.set(item.category_id, (counts.get(item.category_id) || 0) + 1);
+    }
+
+    const categories = await Promise.all(
+      Array.from(counts.entries()).map(async ([categoryId, count]) => {
+        const detail = await mlClient.getCategoryDetail(categoryId).catch(() => null);
+        return {
+          id: categoryId,
+          name: detail?.name ?? categoryId,
+          count,
+          marketSize: detail?.total_items_in_this_category ?? null
+        };
+      })
+    );
+
+    categories.sort((a, b) => b.count - a.count);
+
+    res.json({ categories, total: lightIndex.length });
+  } catch (err) {
+    console.error('[api/categories]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao buscar categorias.' });
+  }
+});
+
+const EXPLORE_CONCURRENCY = 6;
+
+// Navegação livre pela árvore de categorias do Mercado Livre inteiro (não
+// só os anúncios do usuário) — usada para descobrir nichos por tamanho de
+// mercado. Sem ?parent= devolve as categorias de topo; com ?parent=<id>
+// devolve os detalhes dessa categoria e suas subcategorias diretas, cada
+// uma com o percentual que representa dentro da categoria pai.
+router.get('/explore/categories', requireAuth, async (req, res) => {
+  try {
+    const parentId = req.query.parent;
+
+    if (!parentId) {
+      const roots = await mlClient.getSiteCategories();
+      const withTotals = await mapWithConcurrency(roots, EXPLORE_CONCURRENCY, async (cat) => {
+        const detail = await mlClient.getCategoryDetail(cat.id).catch(() => null);
+        return {
+          id: cat.id,
+          name: cat.name,
+          total: detail?.total_items_in_this_category ?? null,
+          representation: null
+        };
+      });
+      return res.json({ current: null, breadcrumb: [], children: withTotals });
+    }
+
+    const parent = await mlClient.getCategoryDetail(parentId);
+    const children = await mapWithConcurrency(parent.children_categories, EXPLORE_CONCURRENCY, async (cat) => {
+      const detail = await mlClient.getCategoryDetail(cat.id).catch(() => null);
+      const total = detail?.total_items_in_this_category ?? null;
+      const representation =
+        total !== null && parent.total_items_in_this_category
+          ? Number(((total / parent.total_items_in_this_category) * 100).toFixed(1))
+          : null;
+      return { id: cat.id, name: cat.name, total, representation };
+    });
+
+    res.json({
+      current: { id: parent.id, name: parent.name, total: parent.total_items_in_this_category },
+      breadcrumb: parent.path_from_root,
+      children
+    });
+  } catch (err) {
+    console.error('[api/explore/categories]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao buscar categorias do Mercado Livre.' });
   }
 });
 
