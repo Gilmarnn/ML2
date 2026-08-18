@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Criar conta — Diagnóstico ML</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="landing">
+    <div class="landing-card">
+      <span class="slash-tag">Criar conta</span>
+      <h1>Comece a <span class="accent">diagnosticar</span></h1>
+      <form id="register-form" style="display:flex;flex-direction:column;gap:14px;text-align:left;margin-top:20px">
+        <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
+          Nome
+          <input type="text" id="name" autocomplete="name" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
+        </label>
+        <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
+          E-mail
+          <input type="email" id="email" autocomplete="username" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
+        </label>
+        <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
+          Senha (mínimo 8 caracteres)
+          <input type="password" id="password" autocomplete="new-password" minlength="8" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
+        </label>
+        <p id="register-error" style="color:var(--danger);font-size:13px;display:none"></p>
+        <button type="submit" class="btn-primary" style="margin-top:6px">Criar conta</button>
+      </form>
+      <p class="fine-print">Já tem conta? <a href="/login.html" style="color:var(--primary)">Entrar</a></p>
+    </div>
+  </main>
+  <script src="register.js"></script>
+</body>
+</html>
