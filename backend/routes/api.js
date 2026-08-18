@@ -133,6 +133,7 @@ router.get('/items', requireAuth, async (req, res) => {
 // o Mercado Livre) — usada para montar o menu lateral de navegação.
 router.get('/categories', requireAuth, async (req, res) => {
   try {
+    const { access_token } = req.session.ml;
     const lightIndex = await getLightIndex(req);
 
     const counts = new Map();
@@ -142,7 +143,7 @@ router.get('/categories', requireAuth, async (req, res) => {
 
     const categories = await Promise.all(
       Array.from(counts.entries()).map(async ([categoryId, count]) => {
-        const detail = await mlClient.getCategoryDetail(categoryId).catch(() => null);
+        const detail = await mlClient.getCategoryDetail(categoryId, access_token).catch(() => null);
         return {
           id: categoryId,
           name: detail?.name ?? categoryId,
@@ -170,12 +171,13 @@ const EXPLORE_CONCURRENCY = 6;
 // uma com o percentual que representa dentro da categoria pai.
 router.get('/explore/categories', requireAuth, async (req, res) => {
   try {
+    const { access_token } = req.session.ml;
     const parentId = req.query.parent;
 
     if (!parentId) {
-      const roots = await mlClient.getSiteCategories();
+      const roots = await mlClient.getSiteCategories(access_token);
       const withTotals = await mapWithConcurrency(roots, EXPLORE_CONCURRENCY, async (cat) => {
-        const detail = await mlClient.getCategoryDetail(cat.id).catch(() => null);
+        const detail = await mlClient.getCategoryDetail(cat.id, access_token).catch(() => null);
         return {
           id: cat.id,
           name: cat.name,
@@ -186,9 +188,9 @@ router.get('/explore/categories', requireAuth, async (req, res) => {
       return res.json({ current: null, breadcrumb: [], children: withTotals });
     }
 
-    const parent = await mlClient.getCategoryDetail(parentId);
+    const parent = await mlClient.getCategoryDetail(parentId, access_token);
     const children = await mapWithConcurrency(parent.children_categories, EXPLORE_CONCURRENCY, async (cat) => {
-      const detail = await mlClient.getCategoryDetail(cat.id).catch(() => null);
+      const detail = await mlClient.getCategoryDetail(cat.id, access_token).catch(() => null);
       const total = detail?.total_items_in_this_category ?? null;
       const representation =
         total !== null && parent.total_items_in_this_category
