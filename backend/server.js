@@ -11,7 +11,7 @@ const userAuthRoutes = require('./routes/userAuth');
 const subscriptionRoutes = require('./routes/subscription');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Validação básica de configuração — falha rápido e com mensagem clara
 // em vez de deixar o app subir "quebrado" silenciosamente.
@@ -116,8 +116,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 runMigrations()
   .then(() => {
-    app.listen(PORT, () => {
-      console.log(`[server] Rodando em http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[servidor] Rodando na porta ${PORT}`);
     });
   })
   .catch((err) => {
