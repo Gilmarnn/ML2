@@ -106,11 +106,12 @@ let siteCategoriesCache = null;
  * Detalhe completo de uma categoria: nome, total de produtos cadastrados
  * nela no Mercado Livre inteiro, e subcategorias filhas.
  */
-async function getCategoryDetail(categoryId) {
+async function getCategoryDetail(categoryId, accessToken) {
   if (categoryDetailCache.has(categoryId)) {
     return categoryDetailCache.get(categoryId);
   }
-  const { data } = await axios.get(`${BASE_URL}/categories/${categoryId}`);
+  const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const { data } = await axios.get(`${BASE_URL}/categories/${categoryId}`, { headers });
   const detail = {
     id: data.id,
     name: data.name,
@@ -122,8 +123,8 @@ async function getCategoryDetail(categoryId) {
   return detail;
 }
 
-async function getCategoryName(categoryId) {
-  const detail = await getCategoryDetail(categoryId);
+async function getCategoryName(categoryId, accessToken) {
+  const detail = await getCategoryDetail(categoryId, accessToken);
   return detail.name;
 }
 
@@ -131,9 +132,10 @@ async function getCategoryName(categoryId) {
  * Categorias de topo do site (Brasil) — o ponto de partida da árvore inteira
  * de categorias do Mercado Livre.
  */
-async function getSiteCategories() {
+async function getSiteCategories(accessToken) {
   if (siteCategoriesCache) return siteCategoriesCache;
-  const { data } = await axios.get(`${BASE_URL}/sites/MLB/categories`);
+  const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const { data } = await axios.get(`${BASE_URL}/sites/MLB/categories`, { headers });
   siteCategoriesCache = data.map((c) => ({ id: c.id, name: c.name }));
   return siteCategoriesCache;
 }
