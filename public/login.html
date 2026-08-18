@@ -3,18 +3,18 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Acesso administrador — Diagnóstico ML</title>
+<title>Login — Diagnóstico ML</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="landing">
     <div class="landing-card">
-      <span class="slash-tag">Acesso administrador</span>
-      <h1>Entrar como <span class="accent">admin</span></h1>
-      <form id="admin-login-form" style="display:flex;flex-direction:column;gap:14px;text-align:left;margin-top:20px">
+      <span class="slash-tag">Entrar</span>
+      <h1>Acesse sua <span class="accent">conta</span></h1>
+      <form id="login-form" style="display:flex;flex-direction:column;gap:14px;text-align:left;margin-top:20px">
         <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
-          Usuário
-          <input type="text" id="username" autocomplete="username" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
+          E-mail
+          <input type="email" id="email" autocomplete="username" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
         </label>
         <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
           Senha
@@ -23,8 +23,9 @@
         <p id="login-error" style="color:var(--danger);font-size:13px;display:none"></p>
         <button type="submit" class="btn-primary" style="margin-top:6px">Entrar</button>
       </form>
+      <p class="fine-print">Ainda não tem conta? <a href="/register.html" style="color:var(--primary)">Cadastre-se</a></p>
     </div>
   </main>
-  <script src="admin-login.js"></script>
+  <script src="login.js"></script>
 </body>
 </html>
