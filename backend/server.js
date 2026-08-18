@@ -13,8 +13,7 @@ const subscriptionRoutes = require('./routes/subscription');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Validação básica de configuração — falha rápido e com mensagem clara
-// em vez de deixar o app subir "quebrado" silenciosamente.
+// 1. Validação de variáveis de ambiente obrigatórias
 const requiredEnvVars = [
   'ML_CLIENT_ID',
   'ML_CLIENT_SECRET',
@@ -28,18 +27,13 @@ const missing = requiredEnvVars.filter((key) => !process.env[key]);
 if (missing.length > 0) {
   console.error(
     `[config] Faltando variáveis de ambiente obrigatórias: ${missing.join(', ')}\n` +
-      '[config] Copie .env.example para .env e preencha os valores antes de rodar o servidor.\n' +
-      '[config] DATABASE_URL normalmente vem pronto se você adicionou o plugin de Postgres no Railway.'
+      '[config] Preencha as variáveis nas configurações do Railway.'
   );
   process.exit(1);
 }
 
-// Necessário porque o Railway (e a maioria dos PaaS) fica atrás de um proxy
-// reverso que termina o HTTPS antes de chegar no app. Sem isso, o Express não
-// reconhece a conexão como segura e o cookie de sessão (secure: true) não é
-// salvo — o usuário fica sendo jogado de volta pra tela de login sempre.
+// 2. Configurações de Proxy e Middlewares Base
 app.set('trust proxy', 1);
-
 app.use(express.json());
 app.use(
   session({
@@ -49,29 +43,24 @@ app.use(
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 24 * 30 // 30 dias — assinante não deveria precisar logar toda hora
+      maxAge: 1000 * 60 * 60 * 24 * 30 // 30 dias
     }
   })
 );
 
-// Rotas de autenticação em si não podem ficar atrás do próprio gate.
+// 3. Servir arquivos estáticos da pasta "público" PRIMEIRO (Evita loops de redirecionamento)
+app.use(express.static(path.join(__dirname, 'público')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// 4. Rota de Health Check
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// 5. Rotas públicas de Autenticação / Webhook
 app.use('/admin', adminAuthRoutes);
 app.use('/user', userAuthRoutes);
+app.use('/auth', authRoutes);
 
-const PUBLIC_PATHS = new Set([
-  '/login.html',
-  '/login.js',
-  '/register.html',
-  '/register.js',
-  '/admin-login.html',
-  '/admin-login.js',
-  '/style.css'
-]);
-
-// Portão 1: precisa estar logado (usuário comum OU admin) pra passar daqui.
-// Exceção: o webhook do Mercado Pago é chamado pelo SERVIDOR deles, não por
-// um navegador logado — precisa ficar de fora do gate de login também.
-// Configuração de rotas e arquivos públicos
+// Listas de arquivos e rotas isentas das travas de login/assinatura
 const PUBLIC_PATHS = new Set([
   '/',
   '/login.html',
@@ -89,11 +78,11 @@ const SUBSCRIPTION_EXEMPT_PATHS = new Set([
   '/subscribe.js'
 ]);
 
-// PORTÃO 1: Autenticação (Precisa estar logado para rotas privadas)
+// PORTÃO 1: Autenticação (Exige login para rotas/arquivos privados)
 app.use((req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
   if (PUBLIC_PATHS.has(req.path)) return next();
-  if (req.session.userId) return next();
+  if (req.session && req.session.userId) return next();
 
   if (req.path.startsWith('/api/') || req.path.startsWith('/subscription/')) {
     return res.status(401).json({ error: 'Login necessário.' });
@@ -101,14 +90,13 @@ app.use((req, res, next) => {
   return res.redirect('/login.html');
 });
 
-// PORTÃO 2: Verificação de Assinatura (Apenas para usuários logados)
+// PORTÃO 2: Verificação de Assinatura (Apenas para usuários autenticados)
 app.use(async (req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
-  if (PUBLIC_PATHS.has(req.path)) return next(); // <-- Não intercepta páginas de login/registro
-  if (!req.session.userId) return next();        // <-- Se não há usuário logado, o Portão 1 já cuidou disso
-  if (req.session.isAdmin) return next();
+  if (PUBLIC_PATHS.has(req.path)) return next();
   if (SUBSCRIPTION_EXEMPT_PATHS.has(req.path)) return next();
   if (req.path.startsWith('/subscription/')) return next();
+  if (req.session && req.session.isAdmin) return next();
 
   try {
     const result = await pool.query('SELECT status FROM subscriptions WHERE user_id = $1', [req.session.userId]);
@@ -125,16 +113,11 @@ app.use(async (req, res, next) => {
   }
 });
 
-// Servir arquivos estáticos (Certifique-se do nome da pasta: 'público' ou 'public')
-app.use(express.static(path.join(__dirname, 'público')));
-app.use('/auth', authRoutes);
+// 6. Rotas Privadas
 app.use('/api', apiRoutes);
 app.use('/subscription', subscriptionRoutes);
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
+// 7. Inicialização do Banco de Dados e Servidor
 runMigrations()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
