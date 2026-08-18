@@ -71,27 +71,41 @@ const PUBLIC_PATHS = new Set([
 // Portão 1: precisa estar logado (usuário comum OU admin) pra passar daqui.
 // Exceção: o webhook do Mercado Pago é chamado pelo SERVIDOR deles, não por
 // um navegador logado — precisa ficar de fora do gate de login também.
+// Configuração de rotas e arquivos públicos
+const PUBLIC_PATHS = new Set([
+  '/',
+  '/login.html',
+  '/login.js',
+  '/register.html',
+  '/register.js',
+  '/admin-login.html',
+  '/admin-login.js',
+  '/estilo.css',
+  '/style.css'
+]);
+
+const SUBSCRIPTION_EXEMPT_PATHS = new Set([
+  '/subscribe.html',
+  '/subscribe.js'
+]);
+
+// PORTÃO 1: Autenticação (Precisa estar logado para rotas privadas)
 app.use((req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
   if (PUBLIC_PATHS.has(req.path)) return next();
   if (req.session.userId) return next();
+
   if (req.path.startsWith('/api/') || req.path.startsWith('/subscription/')) {
     return res.status(401).json({ error: 'Login necessário.' });
   }
   return res.redirect('/login.html');
 });
 
-// Portão 2: se for assinante comum (não admin) sem assinatura ativa, manda
-// pra tela de "assine agora" — exceto nas próprias páginas/rotas de
-// assinatura (e o webhook), senão ninguém consegue nem contratar.
-// Portão 2: se for assinante comum (não admin) sem assinatura ativa, manda
-// pra tela de "assine agora" — exceto nas próprias páginas/rotas de
-// assinatura (e o webhook), senão ninguém consegue nem contratar.
-const SUBSCRIPTION_EXEMPT_PATHS = new Set(['/subscribe.html', '/subscribe.js']);
+// PORTÃO 2: Verificação de Assinatura (Apenas para usuários logados)
 app.use(async (req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
-  if (PUBLIC_PATHS.has(req.path)) return next(); // <-- ADICIONE ESTA LINHA
-  if (!req.session.userId) return next();        // <-- ADICIONE ESTA LINHA
+  if (PUBLIC_PATHS.has(req.path)) return next(); // <-- Não intercepta páginas de login/registro
+  if (!req.session.userId) return next();        // <-- Se não há usuário logado, o Portão 1 já cuidou disso
   if (req.session.isAdmin) return next();
   if (SUBSCRIPTION_EXEMPT_PATHS.has(req.path)) return next();
   if (req.path.startsWith('/subscription/')) return next();
@@ -111,6 +125,8 @@ app.use(async (req, res, next) => {
   }
 });
 
+// Servir arquivos estáticos (Certifique-se do nome da pasta: 'público' ou 'public')
+app.use(express.static(path.join(__dirname, 'público')));
 app.use('/auth', authRoutes);
 app.use('/api', apiRoutes);
 app.use('/subscription', subscriptionRoutes);
