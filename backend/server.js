@@ -84,9 +84,14 @@ app.use((req, res, next) => {
 // Portão 2: se for assinante comum (não admin) sem assinatura ativa, manda
 // pra tela de "assine agora" — exceto nas próprias páginas/rotas de
 // assinatura (e o webhook), senão ninguém consegue nem contratar.
+// Portão 2: se for assinante comum (não admin) sem assinatura ativa, manda
+// pra tela de "assine agora" — exceto nas próprias páginas/rotas de
+// assinatura (e o webhook), senão ninguém consegue nem contratar.
 const SUBSCRIPTION_EXEMPT_PATHS = new Set(['/subscribe.html', '/subscribe.js']);
 app.use(async (req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
+  if (PUBLIC_PATHS.has(req.path)) return next(); // <-- ADICIONE ESTA LINHA
+  if (!req.session.userId) return next();        // <-- ADICIONE ESTA LINHA
   if (req.session.isAdmin) return next();
   if (SUBSCRIPTION_EXEMPT_PATHS.has(req.path)) return next();
   if (req.path.startsWith('/subscription/')) return next();
