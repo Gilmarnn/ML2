@@ -14,6 +14,34 @@ async function fetchImageBase64(url) {
  */
 async function deepAnalysis({ item, competitorData }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Modo de teste: valida o fluxo inteiro (botão, busca de concorrentes,
+  // modal) sem gastar crédito nenhum na API da Anthropic. Ative com
+  // AI_MOCK_MODE=true no .env — desative quando quiser testar de verdade.
+  if (process.env.AI_MOCK_MODE === 'true') {
+    const compLine =
+      competitorData.competitors.length > 0
+        ? `Encontrei ${competitorData.competitors.length} concorrentes reais nessa categoria (preço médio R$ ${competitorData.avgPrice}, ${competitorData.avgPictures} fotos em média, ${competitorData.freeShippingRate}% com frete grátis).`
+        : 'Não encontrei concorrentes comparáveis nessa categoria/busca.';
+
+    return {
+      analysis: `[RESPOSTA DE EXEMPLO — AI_MOCK_MODE ativado, nenhuma chamada real foi feita à API da Anthropic]
+
+TÍTULO SUGERIDO: ${(item.title || '').slice(0, 55)} — Frete Grátis
+
+DESCRIÇÃO — PONTOS DE MELHORIA:
+- Adicione as medidas exatas do produto logo no início da descrição
+- Liste o que vem incluso na embalagem, em tópicos
+- Inclua uma seção de perguntas frequentes respondendo dúvidas comuns
+
+PREÇO: ${compLine}
+
+FOTO: Esta é uma resposta de exemplo — a crítica real da foto aparece aqui quando o modo de teste for desativado.
+
+RISCO DE MUDANÇA: ${item.sold_quantity > 0 ? `Este anúncio já teve ${item.sold_quantity} venda(s) — revise com cautela antes de aplicar mudanças estruturais.` : 'Este anúncio ainda não teve vendas — mudanças estruturais são mais seguras agora.'}`
+    };
+  }
+
   if (!apiKey) {
     return { error: 'ANTHROPIC_API_KEY não configurada no servidor. Configure essa variável para habilitar a análise por IA.' };
   }
