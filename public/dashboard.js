@@ -201,6 +201,15 @@ async function loadCategories() {
   }
 }
 
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  try {
+    await fetch('/user/logout', { method: 'POST' });
+  } catch (err) {
+    // segue para o redirect mesmo se a chamada falhar
+  }
+  window.location.href = '/login.html';
+});
+
 document.getElementById('filter-stock').addEventListener('change', (e) => {
   activeFilters.stock = e.target.value;
   loadItems(true);
@@ -624,7 +633,7 @@ function formatNumber(n) {
 }
 
 function representationColor(repr) {
-  if (repr === null) return { bg: 'var(--surface-alt)', text: 'var(--text-dim)' };
+  if (repr === null) return { bg: 'var(--surface-alt)', bgSoft: 'transparent', text: 'var(--text-dim)' };
   // Interpola de cinza-azulado (baixa relevância) até verde-neon (alta),
   // passando por amarelo no meio — degradê continuo em vez de 3 faixas fixas.
   const pct = Math.max(0, Math.min(100, repr)) / 100;
@@ -643,10 +652,11 @@ function representationColor(repr) {
     b = Math.round(60 + t * (0 - 60));
   }
   const bg = `rgb(${r},${g},${b})`;
+  const bgSoft = `rgba(${r},${g},${b},0.16)`;
   // Texto escuro em fundos claros/verdes, texto claro em fundos escuros/cinza
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   const text = luminance > 0.55 ? '#0a0a0a' : '#f5f5f5';
-  return { bg, text };
+  return { bg, bgSoft, text };
 }
 
 async function loadExploreCategories(parentId) {
@@ -705,9 +715,13 @@ async function loadExploreCategories(parentId) {
 
     gridEl.innerHTML = data.children
       .map((cat) => {
-        const { bg, text } = representationColor(cat.representation);
+        const { bg, bgSoft, text } = representationColor(cat.representation);
+        const bgStyle =
+          cat.representation !== null
+            ? `background: linear-gradient(135deg, ${bgSoft} 0%, var(--surface) 55%); border-left:4px solid ${bg};`
+            : `border-left:4px solid ${bg};`;
         return `
-        <button class="explore-card" data-id="${cat.id}" style="border-left:4px solid ${bg}">
+        <button class="explore-card" data-id="${cat.id}" style="${bgStyle}">
           <span class="cat-name">${escapeHtml(cat.name)}</span>
           <span class="cat-total">${formatNumber(cat.total)} produtos</span>
           ${cat.representation !== null ? `<span class="cat-representation" style="background:${bg};color:${text}">${cat.representation}%</span>` : ''}
