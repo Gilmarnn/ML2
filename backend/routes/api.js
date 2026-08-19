@@ -210,6 +210,106 @@ router.get('/explore/categories', requireAuth, async (req, res) => {
   }
 });
 
+// Perguntas pendentes de resposta nos anúncios — responder rápido é um dos
+// fatores que mais pesa na conversão, então isso mora bem no coração do
+// diagnóstico, não é só um "extra".
+router.get('/questions', requireAuth, async (req, res) => {
+  try {
+    const { access_token, user_id } = req.session.ml;
+    const questions = await mlClient.getUnansweredQuestions(user_id, access_token);
+
+    if (questions.length === 0) {
+      return res.json({ questions: [] });
+    }
+
+    const itemIds = [...new Set(questions.map((q) => q.item_id))];
+    const items = await mlClient.getItemsDetails(itemIds, access_token).catch(() => []);
+    const itemById = new Map(items.map((i) => [i.id, i]));
+
+    const enriched = questions.map((q) => ({
+      id: q.id,
+      text: q.text,
+      dateCreated: q.date_created,
+      itemId: q.item_id,
+      itemTitle: itemById.get(q.item_id)?.title ?? q.item_id,
+      itemThumbnail: itemById.get(q.item_id)?.thumbnail ?? null
+    }));
+
+    res.json({ questions: enriched });
+  } catch (err) {
+    console.error('[api/questions]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao buscar perguntas do Mercado Livre.' });
+  }
+});
+
+router.post('/questions/:id/answer', requireAuth, async (req, res) => {
+  try {
+    const { access_token } = req.session.ml;
+    const { text } = req.body || {};
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: 'Escreva uma resposta antes de enviar.' });
+    }
+    const result = await mlClient.answerQuestion(req.params.id, text.trim(), access_token);
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('[api/questions/:id/answer]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao enviar a resposta ao Mercado Livre.' });
+  }
+});
+
+// Financeiro: faturamento real (via pedidos pagos), não confundir com
+// "sold_quantity" do item (que é total histórico, não fatiado por período).
+router.get('/financials', requireAuth, async (req, res) => {
+  try {
+    const { access_token, user_id } = req.session.ml;
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const orders = await mlClient.getOrders(user_id, access_token, {
+      fromDate: fromDate.toISOString(),
+      toDate: toDate.toISOString()
+    });
+
+    const totalRevenue = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+    const orderCount = orders.length;
+    const averageTicket = orderCount > 0 ? totalRevenue / orderCount : 0;
+
+    // Receita por item, pra achar os mais rentáveis no período (não
+    // necessariamente os que mais vendem em quantidade).
+    const revenueByItem = new Map();
+    for (const order of orders) {
+      for (const item of order.order_items || []) {
+        const id = item.item?.id;
+        const title = item.item?.title || id;
+        const lineTotal = (item.unit_price || 0) * (item.quantity || 0);
+        if (!id) continue;
+        const current = revenueByItem.get(id) || { title, revenue: 0, units: 0 };
+        current.revenue += lineTotal;
+        current.units += item.quantity || 0;
+        revenueByItem.set(id, current);
+      }
+    }
+
+    const topItems = Array.from(revenueByItem.entries())
+      .map(([id, v]) => ({ id, title: v.title, revenue: Number(v.revenue.toFixed(2)), units: v.units }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    res.json({
+      days,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      orderCount,
+      averageTicket: Number(averageTicket.toFixed(2)),
+      topItems
+    });
+  } catch (err) {
+    console.error('[api/financials]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao buscar dados financeiros do Mercado Livre.' });
+  }
+});
+
 router.get('/items/:id/diagnosis', requireAuth, async (req, res) => {
   try {
     const { access_token } = req.session.ml;
