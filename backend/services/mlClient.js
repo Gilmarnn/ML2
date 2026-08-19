@@ -154,6 +154,56 @@ async function getItemDescription(itemId, accessToken) {
   }
 }
 
+/**
+ * Perguntas feitas nos anúncios (pré-venda) — não respondê-las rápido
+ * derruba a conversão. Busca as pendentes de resposta.
+ */
+async function getUnansweredQuestions(userId, accessToken) {
+  const api = client(accessToken);
+  const { data } = await api.get('/questions/search', {
+    params: { seller_id: userId, status: 'UNANSWERED', sort_fields: 'date_created', sort_types: 'DESC', limit: 50 }
+  });
+  return data.questions || [];
+}
+
+async function answerQuestion(questionId, text, accessToken) {
+  const api = client(accessToken);
+  const { data } = await api.post('/answers', { question_id: questionId, text });
+  return data;
+}
+
+/**
+ * Pedidos (vendas) do vendedor num período — a fonte real de faturamento,
+ * diferente de "sold_quantity" do item (que é total histórico do anúncio,
+ * não fatiado por data). Pagina automaticamente até um limite de segurança.
+ */
+async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 300 } = {}) {
+  const api = client(accessToken);
+  const orders = [];
+  let offset = 0;
+  const limit = 50;
+
+  while (orders.length < maxOrders) {
+    const { data } = await api.get('/orders/search', {
+      params: {
+        seller: userId,
+        'order.status': 'paid',
+        'order.date_created.from': fromDate,
+        'order.date_created.to': toDate,
+        sort: 'date_desc',
+        offset,
+        limit
+      }
+    });
+
+    orders.push(...(data.results || []));
+    if (!data.results || data.results.length < limit || orders.length >= data.paging.total) break;
+    offset += limit;
+  }
+
+  return orders;
+}
+
 module.exports = {
   getUserItemIds,
   getItemsDetails,
@@ -163,5 +213,8 @@ module.exports = {
   getCategoryDetail,
   getSiteCategories,
   getItemVisits,
-  getUserInfo
+  getUserInfo,
+  getUnansweredQuestions,
+  answerQuestion,
+  getOrders
 };
