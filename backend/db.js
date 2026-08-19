@@ -68,6 +68,26 @@ async function runMigrations() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS price_races (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      my_item_id TEXT NOT NULL,
+      my_item_title TEXT,
+      competitor_item_id TEXT NOT NULL,
+      competitor_item_title TEXT,
+      rule_type TEXT NOT NULL DEFAULT 'amount_below',
+      rule_value NUMERIC NOT NULL,
+      min_price NUMERIC,
+      active BOOLEAN NOT NULL DEFAULT true,
+      last_checked_at TIMESTAMPTZ,
+      last_competitor_price NUMERIC,
+      last_applied_price NUMERIC,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
   console.log('[db] Migrations aplicadas.');
 }
 
