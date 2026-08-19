@@ -212,6 +212,9 @@ h1, h2, h3 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
+  padding: 4px;
+  background: radial-gradient(circle at 0% 0%, rgba(198,255,0,0.05), transparent 55%);
+  border-radius: 8px;
 }
 
 .explore-card {

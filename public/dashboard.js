@@ -1,25 +1,44 @@
 const tabItems = document.getElementById('tab-items');
+const tabQuestions = document.getElementById('tab-questions');
+const tabFinancials = document.getElementById('tab-financials');
 const tabExplore = document.getElementById('tab-explore');
 const tabCalc = document.getElementById('tab-calc');
 const panelItems = document.getElementById('panel-items');
+const panelQuestions = document.getElementById('panel-questions');
+const panelFinancials = document.getElementById('panel-financials');
 const panelExplore = document.getElementById('panel-explore');
 const panelCalc = document.getElementById('panel-calc');
 
 tabItems.addEventListener('click', () => switchTab('items'));
+tabQuestions.addEventListener('click', () => switchTab('questions'));
+tabFinancials.addEventListener('click', () => switchTab('financials'));
 tabExplore.addEventListener('click', () => switchTab('explore'));
 tabCalc.addEventListener('click', () => switchTab('calc'));
 
+let questionsLoadedOnce = false;
+
 function switchTab(tab) {
   panelItems.hidden = tab !== 'items';
+  panelQuestions.hidden = tab !== 'questions';
+  panelFinancials.hidden = tab !== 'financials';
   panelExplore.hidden = tab !== 'explore';
   panelCalc.hidden = tab !== 'calc';
   tabItems.classList.toggle('active', tab === 'items');
+  tabQuestions.classList.toggle('active', tab === 'questions');
+  tabFinancials.classList.toggle('active', tab === 'financials');
   tabExplore.classList.toggle('active', tab === 'explore');
   tabCalc.classList.toggle('active', tab === 'calc');
 
   if (tab === 'explore' && !exploreLoadedOnce) {
     exploreLoadedOnce = true;
     loadExploreCategories(null);
+  }
+  if (tab === 'questions' && !questionsLoadedOnce) {
+    questionsLoadedOnce = true;
+    loadQuestions();
+  }
+  if (tab === 'financials') {
+    loadFinancials();
   }
 }
 
@@ -440,6 +459,160 @@ function escapeHtml(str) {
 loadItems();
 loadCategories();
 
+// ---------- Financeiro ----------
+
+document.getElementById('financials-days').addEventListener('change', loadFinancials);
+
+async function loadFinancials() {
+  const statusEl = document.getElementById('financials-status');
+  const contentEl = document.getElementById('financials-content');
+  const days = document.getElementById('financials-days').value;
+
+  statusEl.hidden = false;
+  statusEl.textContent = 'Carregando dados financeiros…';
+  contentEl.hidden = true;
+
+  try {
+    const res = await fetch(`/api/financials?days=${days}`);
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    if (data.error) {
+      statusEl.textContent = data.error;
+      return;
+    }
+
+    document.getElementById('fin-revenue').textContent = `R$ ${data.totalRevenue.toFixed(2)}`;
+    document.getElementById('fin-orders').textContent = data.orderCount;
+    document.getElementById('fin-ticket').textContent = `R$ ${data.averageTicket.toFixed(2)}`;
+
+    const topItemsEl = document.getElementById('fin-top-items');
+    if (data.topItems.length === 0) {
+      topItemsEl.innerHTML = '<p style="color:var(--text-dim);font-size:14px">Nenhuma venda paga nesse período.</p>';
+    } else {
+      topItemsEl.innerHTML = data.topItems
+        .map(
+          (item, i) => `
+          <div class="row" style="padding:10px 0">
+            <span>${i + 1}. ${escapeHtml(item.title)} <span style="color:var(--text-dim)">(${item.units} un.)</span></span>
+            <span style="color:var(--primary);font-weight:700">R$ ${item.revenue.toFixed(2)}</span>
+          </div>`
+        )
+        .join('');
+    }
+
+    statusEl.hidden = true;
+    contentEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = 'Erro ao carregar dados financeiros. Veja o console para detalhes.';
+    console.error(err);
+  }
+}
+
+// ---------- Perguntas pendentes do Mercado Livre ----------
+
+async function loadQuestions() {
+  const statusEl = document.getElementById('questions-status');
+  const listEl = document.getElementById('questions-list');
+
+  statusEl.hidden = false;
+  statusEl.textContent = 'Carregando perguntas…';
+  listEl.hidden = true;
+
+  try {
+    const res = await fetch('/api/questions');
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    if (!data.questions || data.questions.length === 0) {
+      statusEl.textContent = 'Nenhuma pergunta pendente de resposta. Tudo em dia! 🎉';
+      return;
+    }
+
+    listEl.innerHTML = data.questions
+      .map(
+        (q) => `
+        <div class="calc-form" style="max-width:none;display:block;padding:18px 20px">
+          <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px">
+            ${q.itemThumbnail ? `<img src="${fixThumb(q.itemThumbnail)}" alt="" style="width:48px;height:48px;object-fit:contain;background:#fff;border-radius:4px;flex-shrink:0" />` : ''}
+            <div>
+              <div style="font-size:12px;color:var(--text-dim)">${escapeHtml(q.itemTitle)}</div>
+              <div style="font-size:15px;margin-top:4px">${escapeHtml(q.text)}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" class="answer-input" data-question-id="${q.id}" placeholder="Digite a resposta…" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:3px;font-size:14px" />
+            <button class="link-btn answer-btn" data-question-id="${q.id}" style="width:auto;padding:9px 18px">Responder</button>
+          </div>
+          <p class="answer-feedback" data-question-id="${q.id}" style="font-size:12px;margin-top:6px;display:none"></p>
+        </div>`
+      )
+      .join('');
+
+    listEl.querySelectorAll('.answer-btn').forEach((btn) => {
+      btn.addEventListener('click', () => submitAnswer(btn.dataset.questionId));
+    });
+
+    statusEl.hidden = true;
+    listEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = 'Erro ao carregar perguntas. Veja o console para detalhes.';
+    console.error(err);
+  }
+}
+
+async function submitAnswer(questionId) {
+  const input = document.querySelector(`.answer-input[data-question-id="${questionId}"]`);
+  const btn = document.querySelector(`.answer-btn[data-question-id="${questionId}"]`);
+  const feedback = document.querySelector(`.answer-feedback[data-question-id="${questionId}"]`);
+  const text = input.value.trim();
+
+  if (!text) {
+    input.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+
+  try {
+    const res = await fetch(`/api/questions/${questionId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.ok) {
+      const card = btn.closest('.calc-form');
+      card.style.opacity = '0.4';
+      feedback.style.color = 'var(--primary)';
+      feedback.textContent = 'Resposta enviada!';
+      feedback.style.display = 'block';
+      input.disabled = true;
+      btn.textContent = 'Respondido';
+    } else {
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = data.error || 'Falha ao enviar.';
+      feedback.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Responder';
+    }
+  } catch (err) {
+    feedback.style.color = 'var(--danger)';
+    feedback.textContent = 'Erro de conexão.';
+    feedback.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Responder';
+  }
+}
+
 // ---------- Explorador de categorias do Mercado Livre ----------
 
 let exploreLoadedOnce = false;
@@ -450,11 +623,30 @@ function formatNumber(n) {
   return Number(n).toLocaleString('pt-BR');
 }
 
-function representationClass(repr) {
-  if (repr === null) return 'repr-low';
-  if (repr >= 40) return 'repr-high';
-  if (repr >= 15) return 'repr-mid';
-  return 'repr-low';
+function representationColor(repr) {
+  if (repr === null) return { bg: 'var(--surface-alt)', text: 'var(--text-dim)' };
+  // Interpola de cinza-azulado (baixa relevância) até verde-neon (alta),
+  // passando por amarelo no meio — degradê continuo em vez de 3 faixas fixas.
+  const pct = Math.max(0, Math.min(100, repr)) / 100;
+  let r, g, b;
+  if (pct < 0.5) {
+    // cinza-azulado (#4a5568) -> amarelo (#e0b13c)
+    const t = pct / 0.5;
+    r = Math.round(74 + t * (224 - 74));
+    g = Math.round(85 + t * (177 - 85));
+    b = Math.round(104 + t * (60 - 104));
+  } else {
+    // amarelo (#e0b13c) -> verde-neon (#c6ff00)
+    const t = (pct - 0.5) / 0.5;
+    r = Math.round(224 + t * (198 - 224));
+    g = Math.round(177 + t * (255 - 177));
+    b = Math.round(60 + t * (0 - 60));
+  }
+  const bg = `rgb(${r},${g},${b})`;
+  // Texto escuro em fundos claros/verdes, texto claro em fundos escuros/cinza
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const text = luminance > 0.55 ? '#0a0a0a' : '#f5f5f5';
+  return { bg, text };
 }
 
 async function loadExploreCategories(parentId) {
@@ -512,14 +704,15 @@ async function loadExploreCategories(parentId) {
     }
 
     gridEl.innerHTML = data.children
-      .map(
-        (cat) => `
-        <button class="explore-card" data-id="${cat.id}">
+      .map((cat) => {
+        const { bg, text } = representationColor(cat.representation);
+        return `
+        <button class="explore-card" data-id="${cat.id}" style="border-left:4px solid ${bg}">
           <span class="cat-name">${escapeHtml(cat.name)}</span>
           <span class="cat-total">${formatNumber(cat.total)} produtos</span>
-          ${cat.representation !== null ? `<span class="cat-representation ${representationClass(cat.representation)}">${cat.representation}%</span>` : ''}
-        </button>`
-      )
+          ${cat.representation !== null ? `<span class="cat-representation" style="background:${bg};color:${text}">${cat.representation}%</span>` : ''}
+        </button>`;
+      })
       .join('');
 
     gridEl.querySelectorAll('.explore-card').forEach((card) => {
