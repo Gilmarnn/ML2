@@ -19,8 +19,30 @@ async function runMigrations() {
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
+      cpf TEXT UNIQUE,
       password_hash TEXT NOT NULL,
       is_admin BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // Garante a coluna cpf mesmo em bancos criados antes dessa mudança.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS cpf TEXT;`);
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_cpf_key') THEN
+        ALTER TABLE users ADD CONSTRAINT users_cpf_key UNIQUE (cpf);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
