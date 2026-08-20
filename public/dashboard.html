@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Dashboard — VISION SELLER</title>
+<title>Visium Seller — Dashboard Multicanal</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">VISION<span class="accent">SELLER</span></span>
+    <span class="brand">Visium<span class="accent"> Seller</span></span>
     <nav>
-      <button id="tab-items" class="tab active">Anúncios</button>
+      <button id="tab-overview" class="tab active">Visão geral</button>
+      <button id="tab-items" class="tab">Anúncios ML</button>
       <button id="tab-questions" class="tab">Perguntas</button>
       <button id="tab-financials" class="tab">Financeiro</button>
       <button id="tab-explore" class="tab">Explorar categorias</button>
@@ -30,9 +31,45 @@
     </aside>
 
     <main class="dashboard">
-      <section id="panel-items">
+      <section class="marketplace-hub" aria-label="Contas de marketplace">
+        <div class="marketplace-hub-main">
+          <div>
+            <div class="marketplace-eyebrow">Canais de venda</div>
+            <strong>Conta ativa</strong>
+          </div>
+          <select id="marketplace-account-select" aria-label="Selecionar conta conectada">
+            <option value="">Carregando contas…</option>
+          </select>
+        </div>
+        <div id="marketplace-actions" class="marketplace-actions">
+          <span class="marketplace-status">Carregando canais disponíveis…</span>
+        </div>
+        <div id="marketplace-connection-status" class="marketplace-status"></div>
+      </section>
+      <section id="panel-overview">
+        <div class="overview-heading">
+          <div>
+            <div class="marketplace-eyebrow">Visão multicanal</div>
+            <h2>Resumo do negócio</h2>
+          </div>
+          <button id="sync-account-btn" class="btn-primary compact">Sincronizar conta ativa</button>
+        </div>
+        <div id="overview-status" class="status">Carregando visão geral…</div>
+        <div id="overview-content" hidden>
+          <div class="overview-cards">
+            <div class="overview-card"><span>Faturamento 30 dias</span><strong id="overview-revenue">R$ 0,00</strong></div>
+            <div class="overview-card"><span>Pedidos 30 dias</span><strong id="overview-orders">0</strong></div>
+            <div class="overview-card"><span>Ticket médio</span><strong id="overview-ticket">R$ 0,00</strong></div>
+            <div class="overview-card"><span>Contas conectadas</span><strong id="overview-accounts">0</strong></div>
+          </div>
+          <h3 class="overview-section-title">Produtos sincronizados</h3>
+          <div id="unified-products" class="unified-products"></div>
+        </div>
+      </section>
+
+      <section id="panel-items" hidden>
         <div class="settings-bar">
-          <label>Comissão ML (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
+          <label>Comissão do canal (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
           <label>Imposto (%)<input type="number" id="global-tax" step="0.1" value="0" /></label>
           <span class="settings-hint">Esses valores são usados para calcular o lucro estimado em cada anúncio abaixo. Informe o custo de cada produto no próprio card.</span>
         </div>

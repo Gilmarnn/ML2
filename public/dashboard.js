@@ -1,15 +1,171 @@
+// ---------- Visium Seller: contexto multicanal ----------
+let activeMarketplaceAccountId = localStorage.getItem('visium:marketplaceAccountId') || '';
+let activeMarketplacePlatform = '';
+let marketplaceAccounts = [];
+
+function withAccount(url) {
+  if (!url.startsWith('/api/') || url.startsWith('/api/unified/') || !activeMarketplaceAccountId) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}accountId=${encodeURIComponent(activeMarketplaceAccountId)}`;
+}
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  if (typeof input === 'string') input = withAccount(input);
+  return nativeFetch(input, init);
+};
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function platformLabel(platform) {
+  return ({ mercadolivre: 'Mercado Livre', tiktok: 'TikTok Shop', shopee: 'Shopee' })[platform] || platform;
+}
+
+function currentAccount() {
+  return marketplaceAccounts.find((a) => String(a.id) === String(activeMarketplaceAccountId)) || null;
+}
+
+async function loadPlatformActions() {
+  const wrap = document.getElementById('marketplace-actions');
+  try {
+    const res = await nativeFetch('/integrations/platforms');
+    const data = await res.json();
+    wrap.innerHTML = (data.platforms || []).map((p) => {
+      const cls = `marketplace-connect ${p.id === 'mercadolivre' ? 'ml' : p.id}`;
+      if (!p.configured) return `<span class="${cls} disabled" title="Configure as credenciais no Railway">${escapeHtml(p.name)} · configurar</span>`;
+      return `<a class="${cls}" href="/integrations/connect/${encodeURIComponent(p.id)}">+ ${escapeHtml(p.name)}</a>`;
+    }).join('');
+  } catch (err) {
+    wrap.innerHTML = '<span class="marketplace-status">Não foi possível carregar os canais.</span>';
+  }
+}
+
+async function loadMarketplaceAccounts() {
+  const select = document.getElementById('marketplace-account-select');
+  const status = document.getElementById('marketplace-connection-status');
+  try {
+    const res = await nativeFetch('/integrations/accounts');
+    const data = await res.json();
+    marketplaceAccounts = data.accounts || [];
+    if (!marketplaceAccounts.length) {
+      activeMarketplaceAccountId = '';
+      activeMarketplacePlatform = '';
+      localStorage.removeItem('visium:marketplaceAccountId');
+      select.innerHTML = '<option value="">Nenhuma conta conectada</option>';
+      status.textContent = 'Conecte seu primeiro canal de vendas.';
+      return;
+    }
+    select.innerHTML = '<option value="">Todos os canais</option>' + marketplaceAccounts.map((a) => `<option value="${a.id}">${escapeHtml(platformLabel(a.platform))} · ${escapeHtml(a.account_name || a.seller_id)}</option>`).join('');
+    const urlAccount = new URLSearchParams(location.search).get('account');
+    if (urlAccount && marketplaceAccounts.some((a) => String(a.id) === String(urlAccount))) activeMarketplaceAccountId = String(urlAccount);
+    if (activeMarketplaceAccountId && !marketplaceAccounts.some((a) => String(a.id) === String(activeMarketplaceAccountId))) activeMarketplaceAccountId = '';
+    select.value = activeMarketplaceAccountId;
+    localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    const current = currentAccount();
+    activeMarketplacePlatform = current?.platform || '';
+    status.textContent = current ? `${platformLabel(current.platform)} conectado · ${current.account_name || current.seller_id}` : 'Visão consolidada de todos os canais.';
+  } catch (err) {
+    select.innerHTML = '<option value="">Erro ao carregar contas</option>';
+    status.textContent = 'Não foi possível consultar as conexões.';
+    console.error(err);
+  }
+}
+
+async function loadOverview() {
+  const status = document.getElementById('overview-status');
+  const content = document.getElementById('overview-content');
+  status.hidden = false;
+  status.textContent = 'Carregando visão geral…';
+  content.hidden = true;
+  try {
+    const query = activeMarketplaceAccountId ? `?accountId=${encodeURIComponent(activeMarketplaceAccountId)}` : '';
+    const [overviewRes, productsRes] = await Promise.all([
+      nativeFetch(`/api/unified/overview${query}`),
+      nativeFetch(`/api/unified/products${query}${query ? '&' : '?'}limit=20`)
+    ]);
+    const overview = await overviewRes.json();
+    const productData = await productsRes.json();
+    if (!overviewRes.ok) throw new Error(overview.error || 'Falha ao carregar visão geral.');
+    document.getElementById('overview-revenue').textContent = formatMoney(overview.last30Days?.revenue || 0);
+    document.getElementById('overview-orders').textContent = Number(overview.last30Days?.orderCount || 0).toLocaleString('pt-BR');
+    document.getElementById('overview-ticket').textContent = formatMoney(overview.last30Days?.averageTicket || 0);
+    document.getElementById('overview-accounts').textContent = overview.accounts?.length || 0;
+    const products = productData.products || [];
+    document.getElementById('unified-products').innerHTML = products.length ? products.map((p) => `
+      <div class="unified-product">
+        ${p.thumbnail ? `<img src="${escapeHtml(fixThumb(p.thumbnail))}" alt="">` : '<div></div>'}
+        <div><strong>${escapeHtml(p.title)}</strong><div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')}</div></div>
+        <span class="platform-pill">${escapeHtml(platformLabel(p.platform))}</span>
+        <strong>${formatMoney(p.price || 0)}</strong>
+      </div>`).join('') : '<div class="status">Nenhum produto sincronizado ainda. Use “Sincronizar conta ativa”.</div>';
+    status.hidden = true;
+    content.hidden = false;
+  } catch (err) {
+    status.textContent = err.message || 'Falha ao carregar visão geral.';
+    console.error(err);
+  }
+}
+
+async function syncActiveAccount() {
+  const btn = document.getElementById('sync-account-btn');
+  const status = document.getElementById('marketplace-connection-status');
+  if (!activeMarketplaceAccountId) {
+    status.textContent = 'Conecte uma conta antes de sincronizar.';
+    return;
+  }
+  btn.classList.add('marketplace-syncing');
+  btn.textContent = 'Sincronizando…';
+  try {
+    const res = await nativeFetch(`/integrations/accounts/${encodeURIComponent(activeMarketplaceAccountId)}/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 30 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha na sincronização.');
+    status.textContent = `Sincronização concluída · ${data.products?.count || 0} produtos · ${data.orders?.count || 0} pedidos`;
+    await loadOverview();
+    if (activeMarketplacePlatform === 'mercadolivre') { loadCategories(); loadItems(true); }
+  } catch (err) {
+    status.textContent = err.message;
+  } finally {
+    btn.classList.remove('marketplace-syncing');
+    btn.textContent = 'Sincronizar conta ativa';
+  }
+}
+
+document.getElementById('marketplace-account-select').addEventListener('change', async (e) => {
+  activeMarketplaceAccountId = e.target.value;
+  localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+  const current = currentAccount();
+  activeMarketplacePlatform = current?.platform || '';
+  document.getElementById('marketplace-connection-status').textContent = current ? `${platformLabel(current.platform)} conectado · ${current.account_name || current.seller_id}` : 'Visão consolidada de todos os canais.';
+  loadedItems = []; currentOffset = 0; questionsLoadedOnce = false;
+  await loadOverview();
+  if (activeMarketplacePlatform === 'mercadolivre') {
+    loadCategories(); loadItems(true);
+  } else {
+    switchTab('overview');
+  }
+});
+
+document.getElementById('sync-account-btn').addEventListener('click', syncActiveAccount);
+
+const tabOverview = document.getElementById('tab-overview');
 const tabItems = document.getElementById('tab-items');
 const tabQuestions = document.getElementById('tab-questions');
 const tabFinancials = document.getElementById('tab-financials');
 const tabExplore = document.getElementById('tab-explore');
 const tabCalc = document.getElementById('tab-calc');
+const panelOverview = document.getElementById('panel-overview');
 const panelItems = document.getElementById('panel-items');
 const panelQuestions = document.getElementById('panel-questions');
 const panelFinancials = document.getElementById('panel-financials');
 const panelExplore = document.getElementById('panel-explore');
 const panelCalc = document.getElementById('panel-calc');
 
-tabItems.addEventListener('click', () => switchTab('items'));
+tabOverview.addEventListener('click', () => switchTab('overview'));
+tabItems.addEventListener('click', () => { if (activeMarketplacePlatform !== 'mercadolivre') return switchTab('overview'); switchTab('items'); });
 tabQuestions.addEventListener('click', () => switchTab('questions'));
 tabFinancials.addEventListener('click', () => switchTab('financials'));
 tabExplore.addEventListener('click', () => switchTab('explore'));
@@ -18,17 +174,21 @@ tabCalc.addEventListener('click', () => switchTab('calc'));
 let questionsLoadedOnce = false;
 
 function switchTab(tab) {
+  if (activeMarketplacePlatform !== 'mercadolivre' && ['items','questions','financials','explore'].includes(tab)) tab = 'overview';
+  panelOverview.hidden = tab !== 'overview';
   panelItems.hidden = tab !== 'items';
   panelQuestions.hidden = tab !== 'questions';
   panelFinancials.hidden = tab !== 'financials';
   panelExplore.hidden = tab !== 'explore';
   panelCalc.hidden = tab !== 'calc';
+  tabOverview.classList.toggle('active', tab === 'overview');
   tabItems.classList.toggle('active', tab === 'items');
   tabQuestions.classList.toggle('active', tab === 'questions');
   tabFinancials.classList.toggle('active', tab === 'financials');
   tabExplore.classList.toggle('active', tab === 'explore');
   tabCalc.classList.toggle('active', tab === 'calc');
 
+  if (tab === 'overview') loadOverview();
   if (tab === 'explore' && !exploreLoadedOnce) {
     exploreLoadedOnce = true;
     loadExploreCategories(null);
@@ -465,8 +625,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-loadItems();
-loadCategories();
+(async function initVisiumDashboard() {
+  await Promise.all([loadPlatformActions(), loadMarketplaceAccounts()]);
+  await loadOverview();
+  if (activeMarketplacePlatform === 'mercadolivre') {
+    loadItems();
+    loadCategories();
+  }
+})();
 
 // ---------- Financeiro ----------
 
