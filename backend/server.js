@@ -2,102 +2,93 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const pgSessionFactory = require('connect-pg-simple');
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 
 const { pool, runMigrations } = require('./db');
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
+const unifiedRoutes = require('./routes/unified');
 const adminAuthRoutes = require('./routes/adminAuth');
 const userAuthRoutes = require('./routes/userAuth');
 const subscriptionRoutes = require('./routes/subscription');
+const integrationRoutes = require('./routes/integrations');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Validação básica de configuração — falha rápido e com mensagem clara
-// em vez de deixar o app subir "quebrado" silenciosamente.
-const requiredEnvVars = [
-  'ML_CLIENT_ID',
-  'ML_CLIENT_SECRET',
-  'ML_REDIRECT_URI',
-  'SESSION_SECRET',
-  'ADMIN_USERNAME',
-  'ADMIN_PASSWORD',
-  'DATABASE_URL'
-];
-const missing = requiredEnvVars.filter((key) => !process.env[key]);
-if (missing.length > 0) {
-  console.error(
-    `[config] Faltando variáveis de ambiente obrigatórias: ${missing.join(', ')}\n` +
-      '[config] Copie .env.example para .env e preencha os valores antes de rodar o servidor.\n' +
-      '[config] DATABASE_URL normalmente vem pronto se você adicionou o plugin de Postgres no Railway.'
-  );
+const required = ['SESSION_SECRET', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'DATABASE_URL'];
+const missing = required.filter((key) => !process.env[key]);
+if (missing.length) {
+  console.error(`[config] Variáveis obrigatórias ausentes: ${missing.join(', ')}`);
   process.exit(1);
 }
 
-// Necessário porque o Railway (e a maioria dos PaaS) fica atrás de um proxy
-// reverso que termina o HTTPS antes de chegar no app. Sem isso, o Express não
-// reconhece a conexão como segura e o cookie de sessão (secure: true) não é
-// salvo — o usuário fica sendo jogado de volta pra tela de login sempre.
 app.set('trust proxy', 1);
-
-app.use(express.json());
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 24 * 30 // 30 dias — assinante não deveria precisar logar toda hora
+app.disable('x-powered-by');
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"]
     }
-  })
-);
+  }
+}));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
-// Rotas de autenticação em si não podem ficar atrás do próprio gate.
+const PgSession = pgSessionFactory(session);
+app.use(session({
+  store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: true }),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 1000 * 60 * 60 * 24 * 30
+  }
+}));
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false });
+app.use('/user/login', authLimiter);
+app.use('/user/register', authLimiter);
+app.use('/user/forgot-password', authLimiter);
+app.use('/admin/login', authLimiter);
+
 app.use('/admin', adminAuthRoutes);
 app.use('/user', userAuthRoutes);
 
 const PUBLIC_PATHS = new Set([
-  '/login.html',
-  '/login.js',
-  '/register.html',
-  '/register.js',
-  '/admin-login.html',
-  '/admin-login.js',
-  '/style.css'
+  '/login.html','/login.js','/register.html','/register.js','/admin-login.html','/admin-login.js',
+  '/forgot-password.html','/forgot-password.js','/reset-password.html','/reset-password.js','/style.css','/health'
 ]);
 
-// Portão 1: precisa estar logado (usuário comum OU admin) pra passar daqui.
-// Exceção: o webhook do Mercado Pago é chamado pelo SERVIDOR deles, não por
-// um navegador logado — precisa ficar de fora do gate de login também.
 app.use((req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
   if (PUBLIC_PATHS.has(req.path)) return next();
   if (req.session.userId) return next();
-  if (req.path.startsWith('/api/') || req.path.startsWith('/subscription/')) {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/integrations/') || req.path.startsWith('/subscription/')) {
     return res.status(401).json({ error: 'Login necessário.' });
   }
   return res.redirect('/login.html');
 });
 
-// Portão 2: se for assinante comum (não admin) sem assinatura ativa, manda
-// pra tela de "assine agora" — exceto nas próprias páginas/rotas de
-// assinatura (e o webhook), senão ninguém consegue nem contratar.
 const SUBSCRIPTION_EXEMPT_PATHS = new Set(['/subscribe.html', '/subscribe.js']);
 app.use(async (req, res, next) => {
   if (req.path === '/subscription/webhook') return next();
-  if (!req.session.userId) return next(); // não logado ainda — deixa o portão 1 cuidar disso
-  if (req.session.isAdmin) return next();
-  if (SUBSCRIPTION_EXEMPT_PATHS.has(req.path)) return next();
-  if (req.path.startsWith('/subscription/')) return next();
-
+  if (!req.session.userId || req.session.isAdmin) return next();
+  if (SUBSCRIPTION_EXEMPT_PATHS.has(req.path) || req.path.startsWith('/subscription/')) return next();
   try {
-    const result = await pool.query('SELECT status FROM subscriptions WHERE user_id = $1', [req.session.userId]);
-    const status = result.rows[0]?.status;
-    if (status === 'authorized') return next();
-
-    if (req.path.startsWith('/api/')) {
+    const result = await pool.query('SELECT status FROM subscriptions WHERE user_id=$1', [req.session.userId]);
+    if (result.rows[0]?.status === 'authorized') return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith('/integrations/')) {
       return res.status(402).json({ error: 'Assinatura pendente ou inativa.' });
     }
     return res.redirect('/subscribe.html');
@@ -109,19 +100,23 @@ app.use(async (req, res, next) => {
 
 app.use('/auth', authRoutes);
 app.use('/api', apiRoutes);
+app.use('/api/unified', unifiedRoutes);
 app.use('/subscription', subscriptionRoutes);
+app.use('/integrations', integrationRoutes);
+app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'], maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', app: 'visium-seller', version: '2.0.0' });
+  } catch (_) {
+    res.status(503).json({ status: 'degraded', database: 'unavailable' });
+  }
+});
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-runMigrations()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`[server] Rodando em http://localhost:${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('[db] Falha ao rodar migrations:', err.message);
-    process.exit(1);
-  });
+runMigrations().then(() => {
+  app.listen(PORT, () => console.log(`[server] Visium Seller rodando na porta ${PORT}`));
+}).catch((err) => {
+  console.error('[db] Falha nas migrations:', err);
+  process.exit(1);
+});
