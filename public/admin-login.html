@@ -6,14 +6,6 @@
 <title>Acesso administrador — Diagnóstico ML</title>
 <link rel="stylesheet" href="style.css" />
 
-<style id="visium-password-toggle-style">
-.password-toggle-wrap{position:relative}
-.password-toggle-wrap input[type="password"],
-.password-toggle-wrap input[type="text"]{padding-right:48px!important}
-.password-toggle-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;padding:6px;color:inherit;opacity:.75;line-height:1;font-size:18px}
-.password-toggle-btn:hover{opacity:1}
-.password-toggle-btn:focus-visible{outline:2px solid currentColor;outline-offset:2px;border-radius:6px}
-</style>
 
 </head>
 <body>
@@ -37,19 +29,7 @@
   </main>
   <script src="admin-login.js"></script>
 
-<script id="visium-password-toggle-script">
-document.querySelectorAll('.password-toggle-btn').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    var input = btn.parentElement.querySelector('input');
-    if (!input) return;
-    var showing = input.type === 'text';
-    input.type = showing ? 'password' : 'text';
-    btn.textContent = showing ? '👁' : '🙈';
-    btn.setAttribute('aria-label', showing ? 'Mostrar senha' : 'Ocultar senha');
-    btn.setAttribute('title', showing ? 'Mostrar senha' : 'Ocultar senha');
-  });
-});
-</script>
 
+  <script src="password-toggle.js"></script>
 </body>
 </html>

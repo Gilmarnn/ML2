@@ -68,7 +68,7 @@ app.use('/user', userAuthRoutes);
 
 const PUBLIC_PATHS = new Set([
   '/login.html','/login.js','/register.html','/register.js','/admin-login.html','/admin-login.js',
-  '/forgot-password.html','/forgot-password.js','/reset-password.html','/reset-password.js','/style.css','/health'
+  '/forgot-password.html','/forgot-password.js','/reset-password.html','/reset-password.js','/password-toggle.js','/style.css','/health'
 ]);
 
 app.use((req, res, next) => {
@@ -104,12 +104,12 @@ app.use('/api', apiRoutes);
 app.use('/api/unified', unifiedRoutes);
 app.use('/subscription', subscriptionRoutes);
 app.use('/integrations', integrationRoutes);
-app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'], maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'], maxAge: 0 }));
 
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', app: 'visium-seller', version: '2.0.0' });
+    res.json({ status: 'ok', app: 'visium-seller', version: '2.0.3' });
   } catch (_) {
     res.status(503).json({ status: 'degraded', database: 'unavailable' });
   }

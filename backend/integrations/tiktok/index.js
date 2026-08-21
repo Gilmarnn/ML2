@@ -7,6 +7,10 @@ module.exports = {
   api,
   capabilities: ['products', 'orders', 'shops'],
   isConfigured() {
-    return Boolean(process.env.TIKTOK_APP_KEY && process.env.TIKTOK_APP_SECRET && process.env.TIKTOK_SERVICE_ID && process.env.TIKTOK_REDIRECT_URI);
+    return Boolean(
+      process.env.TIKTOK_APP_KEY &&
+      process.env.TIKTOK_APP_SECRET &&
+      process.env.TIKTOK_SERVICE_ID
+    );
   }
 };

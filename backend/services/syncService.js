@@ -45,6 +45,17 @@ async function saveOrders(account, rawOrders) {
   return count;
 }
 
+async function ensureFreshAccount(account, adapter) {
+  if (!account?.expires_at || !adapter?.auth?.refreshAccount) return account;
+  const expiresAt = new Date(account.expires_at).getTime();
+  if (!Number.isFinite(expiresAt)) return account;
+  // Renova antes da expiração para que sincronizações longas não morram no meio.
+  if (expiresAt - Date.now() <= 10 * 60 * 1000) {
+    return adapter.auth.refreshAccount(account);
+  }
+  return account;
+}
+
 async function enrichAccountMetadata(account, extra) {
   if (!extra || !Object.keys(extra).length) return account;
   const result = await pool.query(`UPDATE marketplace_accounts SET metadata=metadata || $1::jsonb,
@@ -57,6 +68,7 @@ async function syncProducts(userId, accountId) {
   let account = await resolveAccount(userId, { accountId });
   if (!account) throw new Error('Conta de marketplace não encontrada.');
   const adapter = getAdapter(account.platform);
+  account = await ensureFreshAccount(account, adapter);
   if (!adapter?.api?.getProducts) throw new Error(`Produtos ainda não são suportados por ${account.platform}.`);
   const logId = await startLog(account.id, 'products');
   try {
@@ -82,6 +94,7 @@ async function syncOrders(userId, accountId, { days = 30 } = {}) {
   let account = await resolveAccount(userId, { accountId });
   if (!account) throw new Error('Conta de marketplace não encontrada.');
   const adapter = getAdapter(account.platform);
+  account = await ensureFreshAccount(account, adapter);
   if (!adapter?.api?.getOrders) throw new Error(`Pedidos ainda não são suportados por ${account.platform}.`);
   const logId = await startLog(account.id, 'orders');
   const toDate = new Date();
