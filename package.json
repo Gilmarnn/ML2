@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node backend/server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "prestart": "node scripts-check-deploy.js",
+    "check:deploy": "node scripts-check-deploy.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
