@@ -61,8 +61,15 @@ async function loadMarketplaceAccounts() {
     const urlAccount = new URLSearchParams(location.search).get('account');
     if (urlAccount && marketplaceAccounts.some((a) => String(a.id) === String(urlAccount))) activeMarketplaceAccountId = String(urlAccount);
     if (activeMarketplaceAccountId && !marketplaceAccounts.some((a) => String(a.id) === String(activeMarketplaceAccountId))) activeMarketplaceAccountId = '';
+    // Se só existe uma conta conectada, ela deve ser a conta ativa por padrão.
+    // Antes o dashboard permanecia em "Todos os canais", o que fazia as abas do ML
+    // parecerem quebradas porque não havia plataforma ativa.
+    if (!activeMarketplaceAccountId && marketplaceAccounts.length === 1) {
+      activeMarketplaceAccountId = String(marketplaceAccounts[0].id);
+    }
     select.value = activeMarketplaceAccountId;
-    localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    if (activeMarketplaceAccountId) localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    else localStorage.removeItem('visium:marketplaceAccountId');
     const current = currentAccount();
     activeMarketplacePlatform = current?.platform || '';
     status.textContent = current ? `${platformLabel(current.platform)} conectado · ${current.account_name || current.seller_id}` : 'Visão consolidada de todos os canais.';
@@ -112,8 +119,16 @@ async function syncActiveAccount() {
   const btn = document.getElementById('sync-account-btn');
   const status = document.getElementById('marketplace-connection-status');
   if (!activeMarketplaceAccountId) {
-    status.textContent = 'Conecte uma conta antes de sincronizar.';
-    return;
+    const onlyAccount = marketplaceAccounts.length === 1 ? marketplaceAccounts[0] : null;
+    if (onlyAccount) {
+      activeMarketplaceAccountId = String(onlyAccount.id);
+      activeMarketplacePlatform = onlyAccount.platform;
+      document.getElementById('marketplace-account-select').value = activeMarketplaceAccountId;
+      localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    } else {
+      status.textContent = 'Selecione uma conta antes de sincronizar.';
+      return;
+    }
   }
   btn.classList.add('marketplace-syncing');
   btn.textContent = 'Sincronizando…';
@@ -164,11 +179,32 @@ const panelFinancials = document.getElementById('panel-financials');
 const panelExplore = document.getElementById('panel-explore');
 const panelCalc = document.getElementById('panel-calc');
 
+async function ensureMercadoLivreAccount() {
+  if (activeMarketplacePlatform === 'mercadolivre' && activeMarketplaceAccountId) return true;
+  const mlAccount = marketplaceAccounts.find((a) => a.platform === 'mercadolivre' && a.status !== 'disconnected');
+  if (!mlAccount) {
+    document.getElementById('marketplace-connection-status').textContent = 'Conecte uma conta do Mercado Livre para usar esta área.';
+    return false;
+  }
+  activeMarketplaceAccountId = String(mlAccount.id);
+  activeMarketplacePlatform = 'mercadolivre';
+  localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+  const accountSelect = document.getElementById('marketplace-account-select');
+  accountSelect.value = activeMarketplaceAccountId;
+  document.getElementById('marketplace-connection-status').textContent = `Mercado Livre conectado · ${mlAccount.account_name || mlAccount.seller_id}`;
+  return true;
+}
+
+async function openMlTab(tab) {
+  if (!await ensureMercadoLivreAccount()) return;
+  switchTab(tab);
+}
+
 tabOverview.addEventListener('click', () => switchTab('overview'));
-tabItems.addEventListener('click', () => { if (activeMarketplacePlatform !== 'mercadolivre') return switchTab('overview'); switchTab('items'); });
-tabQuestions.addEventListener('click', () => switchTab('questions'));
-tabFinancials.addEventListener('click', () => switchTab('financials'));
-tabExplore.addEventListener('click', () => switchTab('explore'));
+tabItems.addEventListener('click', () => openMlTab('items'));
+tabQuestions.addEventListener('click', () => openMlTab('questions'));
+tabFinancials.addEventListener('click', () => openMlTab('financials'));
+tabExplore.addEventListener('click', () => openMlTab('explore'));
 tabCalc.addEventListener('click', () => switchTab('calc'));
 
 let questionsLoadedOnce = false;

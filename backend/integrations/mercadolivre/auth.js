@@ -53,6 +53,15 @@ async function handleCallback(req, code, state) {
       account_name=EXCLUDED.account_name, access_token=EXCLUDED.access_token,
       refresh_token=EXCLUDED.refresh_token, expires_at=EXCLUDED.expires_at, status='active', updated_at=now()
     RETURNING *`, [req.session.userId, String(user_id), accountName, access_token, refresh_token || null, expiresAt]);
+  // Também espelha a conexão na tabela legada. Algumas rotas antigas ainda podem
+  // utilizá-la durante a transição para a arquitetura multicanal.
+  await pool.query(`
+    INSERT INTO ml_connections (user_id,access_token,refresh_token,ml_user_id,expires_at)
+    VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT (user_id) DO UPDATE SET
+      access_token=EXCLUDED.access_token, refresh_token=EXCLUDED.refresh_token,
+      ml_user_id=EXCLUDED.ml_user_id, expires_at=EXCLUDED.expires_at`,
+    [req.session.userId, access_token, refresh_token || '', String(user_id), expiresAt.getTime()]);
   delete req.session.marketplaceOAuthState;
   return result.rows[0];
 }
