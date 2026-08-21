@@ -1,25 +1,19 @@
 {
-  "name": "visium-seller",
-  "version": "2.0.0",
-  "description": "Visium Seller - analytics multicanal para marketplaces",
+  "name": "mercado-diagnostico",
+  "version": "1.0.0",
+  "description": "Ferramenta de diagnostico de anuncios do Mercado Livre - conecta conta via OAuth, analisa anuncios e calcula custos/margem.",
   "type": "commonjs",
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "node backend/server.js",
-    "test": "node --test test/*.test.js",
-    "prestart": "node scripts-check-deploy.js",
-    "check:deploy": "node scripts-check-deploy.js"
+    "dev": "node backend/server.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
     "bcryptjs": "^2.4.3",
-    "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "express-rate-limit": "^7.4.1",
     "express-session": "^1.18.0",
-    "helmet": "^8.0.0",
     "pg": "^8.12.0"
   },
   "engines": {
