@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Login — Visium Seller</title>
 <link rel="stylesheet" href="style.css" />
+
+<style id="visium-password-toggle-style">
+.password-toggle-wrap{position:relative}
+.password-toggle-wrap input[type="password"],
+.password-toggle-wrap input[type="text"]{padding-right:48px!important}
+.password-toggle-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;padding:6px;color:inherit;opacity:.75;line-height:1;font-size:18px}
+.password-toggle-btn:hover{opacity:1}
+.password-toggle-btn:focus-visible{outline:2px solid currentColor;outline-offset:2px;border-radius:6px}
+</style>
+
 </head>
 <body>
   <main class="landing">
@@ -18,7 +28,7 @@
         </label>
         <label style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;display:flex;flex-direction:column;gap:6px">
           Senha
-          <input type="password" id="password" autocomplete="current-password" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" />
+          <div class="password-toggle-wrap"><input type="password" id="password" autocomplete="current-password" required style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:3px;font-size:15px" /><button type="button" class="password-toggle-btn" aria-label="Mostrar senha" title="Mostrar senha">👁</button></div>
         </label>
         <p id="login-error" style="color:var(--danger);font-size:13px;display:none"></p>
         <button type="submit" class="btn-primary" style="margin-top:6px">Entrar</button>
@@ -28,5 +38,20 @@
     </div>
   </main>
   <script src="login.js"></script>
+
+<script id="visium-password-toggle-script">
+document.querySelectorAll('.password-toggle-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var input = btn.parentElement.querySelector('input');
+    if (!input) return;
+    var showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.textContent = showing ? '👁' : '🙈';
+    btn.setAttribute('aria-label', showing ? 'Mostrar senha' : 'Ocultar senha');
+    btn.setAttribute('title', showing ? 'Mostrar senha' : 'Ocultar senha');
+  });
+});
+</script>
+
 </body>
 </html>

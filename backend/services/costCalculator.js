@@ -11,41 +11,64 @@
 function calculateMargin({
   price,
   productCost,
-  mlCommissionPercent, // ex: 12.5 para 12,5%
+  mlCommissionPercent = 0,
   shippingCost = 0,
-  fixedFee = 0, // tarifa fixa do ML para itens de baixo valor, se aplicável
-  taxPercent = 0, // imposto sobre a venda (Simples Nacional, etc.)
-  adsCostPercent = 0 // custo de Ads como % do preço, se o vendedor usa Product Ads
+  fixedFee = 0,
+  taxPercent = 0,
+  adsCostPercent = 0
 }) {
-  if (price <= 0) throw new Error('price precisa ser maior que zero');
+  const values = {
+    price: toNumber(price, 'price'),
+    productCost: toNumber(productCost, 'productCost'),
+    mlCommissionPercent: toNumber(mlCommissionPercent, 'mlCommissionPercent'),
+    shippingCost: toNumber(shippingCost, 'shippingCost'),
+    fixedFee: toNumber(fixedFee, 'fixedFee'),
+    taxPercent: toNumber(taxPercent, 'taxPercent'),
+    adsCostPercent: toNumber(adsCostPercent, 'adsCostPercent')
+  };
 
-  const commissionValue = price * (mlCommissionPercent / 100);
-  const taxValue = price * (taxPercent / 100);
-  const adsValue = price * (adsCostPercent / 100);
+  if (values.price <= 0) throw new Error('price precisa ser maior que zero');
+  for (const [key, value] of Object.entries(values)) {
+    if (key !== 'price' && value < 0) throw new Error(`${key} não pode ser negativo`);
+  }
 
-  const totalCosts = productCost + commissionValue + shippingCost + fixedFee + taxValue + adsValue;
-  const netProfit = price - totalCosts;
-  const marginPercent = (netProfit / price) * 100;
+  const percentCosts = values.mlCommissionPercent + values.taxPercent + values.adsCostPercent;
+  if (percentCosts >= 100) {
+    throw new Error('A soma dos custos percentuais precisa ser menor que 100%.');
+  }
 
-  // Preço mínimo pra não ter prejuízo, mantendo as mesmas taxas percentuais
-  const percentCostsRatio = (mlCommissionPercent + taxPercent + adsCostPercent) / 100;
-  const breakevenPrice = (productCost + shippingCost + fixedFee) / (1 - percentCostsRatio);
+  const commissionValue = values.price * (values.mlCommissionPercent / 100);
+  const taxValue = values.price * (values.taxPercent / 100);
+  const adsValue = values.price * (values.adsCostPercent / 100);
+
+  const totalCosts = values.productCost + commissionValue + values.shippingCost + values.fixedFee + taxValue + adsValue;
+  const netProfit = values.price - totalCosts;
+  const marginPercent = (netProfit / values.price) * 100;
+  const percentCostsRatio = percentCosts / 100;
+  const breakevenPrice = (values.productCost + values.shippingCost + values.fixedFee) / (1 - percentCostsRatio);
 
   return {
-    price,
+    price: values.price,
     totalCosts: round2(totalCosts),
     netProfit: round2(netProfit),
     marginPercent: round2(marginPercent),
     breakevenPrice: round2(breakevenPrice),
     breakdown: {
-      productCost: round2(productCost),
+      productCost: round2(values.productCost),
       commissionValue: round2(commissionValue),
-      shippingCost: round2(shippingCost),
-      fixedFee: round2(fixedFee),
+      shippingCost: round2(values.shippingCost),
+      fixedFee: round2(values.fixedFee),
       taxValue: round2(taxValue),
       adsValue: round2(adsValue)
     }
   };
+}
+
+function toNumber(value, field) {
+  if (typeof value === 'string') value = value.trim().replace(',', '.');
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`${field} precisa ser numérico`);
+  return number;
 }
 
 function round2(n) {
