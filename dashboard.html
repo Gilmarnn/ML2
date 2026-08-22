@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Visium Seller — Dashboard Multicanal</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand brand-logo" href="dashboard.html" aria-label="Visium Seller — Visão geral">
+      <img src="assets/visium-logo-header.png" alt="Visium Seller" />
+    </a>
+    <nav>
+      <button id="tab-overview" class="tab active">Visão geral</button>
+      <button id="tab-items" class="tab">Anúncios ML</button>
+      <button id="tab-questions" class="tab">Perguntas</button>
+      <button id="tab-financials" class="tab">Financeiro</button>
+      <button id="tab-explore" class="tab">Explorar categorias</button>
+      <button id="tab-calc" class="tab">Calculadora de margem</button>
+      <button id="logout-btn" class="tab" style="margin-left:20px;color:var(--danger)">Sair</button>
+    </nav>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-title">Filtrar por categoria</div>
+      <nav id="category-list" class="category-list">
+        <button class="category-item active" data-category="">
+          <span>Todos os anúncios</span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="dashboard">
+      <section class="marketplace-hub" aria-label="Contas de marketplace">
+        <div class="marketplace-hub-main">
+          <div>
+            <div class="marketplace-eyebrow">Canais de venda</div>
+            <strong>Conta ativa</strong>
+          </div>
+          <select id="marketplace-account-select" aria-label="Selecionar conta conectada">
+            <option value="">Carregando contas…</option>
+          </select>
+        </div>
+        <div id="marketplace-actions" class="marketplace-actions">
+          <span class="marketplace-status">Carregando canais disponíveis…</span>
+        </div>
+        <div id="marketplace-connection-status" class="marketplace-status"></div>
+      </section>
+      <section id="panel-overview">
+        <div class="overview-heading">
+          <div>
+            <div class="marketplace-eyebrow">Visão multicanal</div>
+            <h2>Resumo do negócio</h2>
+          </div>
+          <button id="sync-account-btn" class="btn-primary compact">Sincronizar conta ativa</button>
+        </div>
+        <div id="overview-status" class="status">Carregando visão geral…</div>
+        <div id="overview-content" hidden>
+          <div class="overview-cards">
+            <div class="overview-card"><span>Faturamento 30 dias</span><strong id="overview-revenue">R$ 0,00</strong></div>
+            <div class="overview-card"><span>Pedidos 30 dias</span><strong id="overview-orders">0</strong></div>
+            <div class="overview-card"><span>Ticket médio</span><strong id="overview-ticket">R$ 0,00</strong></div>
+            <div class="overview-card"><span>Contas conectadas</span><strong id="overview-accounts">0</strong></div>
+          </div>
+          <div class="overview-workspace">
+            <div class="overview-products-column">
+              <h3 id="overview-products-title" class="overview-section-title">Desempenho dos produtos · últimos 30 dias</h3>
+              <div id="unified-products" class="unified-products"></div>
+            </div>
+            <aside id="overview-product-insight" class="overview-product-insight" aria-live="polite">
+              <div class="overview-insight-empty">Passe o mouse sobre um produto para ver os detalhes.</div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-items" hidden>
+        <div class="settings-bar">
+          <label>Comissão do canal (%)<input type="number" id="global-commission" step="0.1" value="12" /></label>
+          <label>Imposto (%)<input type="number" id="global-tax" step="0.1" value="0" /></label>
+          <span class="settings-hint">Esses valores são usados para calcular o lucro estimado em cada anúncio abaixo. Informe o custo de cada produto no próprio card.</span>
+        </div>
+
+        <div class="filter-bar">
+          <label>Estoque
+            <select id="filter-stock">
+              <option value="">Todos</option>
+              <option value="zero">Zerado</option>
+              <option value="available">Disponível</option>
+            </select>
+          </label>
+          <label>Tipo de anúncio
+            <select id="filter-listing-type">
+              <option value="">Todos</option>
+              <option value="classic">Clássico</option>
+              <option value="premium">Premium</option>
+            </select>
+          </label>
+          <label>Ordenar por
+            <select id="filter-sort">
+              <option value="">Padrão</option>
+              <option value="most_sold">Mais vendidos primeiro</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="items-status" class="status">Carregando anúncios…</div>
+        <div id="items-grid" class="items-grid" hidden></div>
+        <div id="load-more-wrap" style="text-align:center;margin-top:16px" hidden>
+          <button id="load-more-btn" class="link-btn" style="width:auto;padding:10px 24px">Carregar mais anúncios</button>
+          <p id="load-more-count" style="color:var(--text-dim);font-size:13px;margin-top:8px"></p>
+        </div>
+      </section>
+
+      <section id="panel-questions" hidden>
+        <h2 style="font-size:24px;margin-bottom:14px">Perguntas pendentes de resposta</h2>
+        <div id="questions-status" class="status">Carregando perguntas…</div>
+        <div id="questions-list" style="display:flex;flex-direction:column;gap:12px" hidden></div>
+      </section>
+
+      <section id="panel-financials" hidden>
+        <h2 style="font-size:24px;margin-bottom:14px">Financeiro</h2>
+        <div class="filter-bar">
+          <label>Período
+            <select id="financials-days">
+              <option value="7">Últimos 7 dias</option>
+              <option value="30" selected>Últimos 30 dias</option>
+              <option value="90">Últimos 90 dias</option>
+            </select>
+          </label>
+        </div>
+        <div id="financials-status" class="status">Carregando dados financeiros…</div>
+        <div id="financials-content" hidden>
+          <div class="items-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:24px">
+            <div class="calc-result" style="margin-top:0">
+              <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Faturamento</div>
+              <div id="fin-revenue" class="big-number" style="color:var(--primary)"></div>
+            </div>
+            <div class="calc-result" style="margin-top:0">
+              <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Pedidos pagos</div>
+              <div id="fin-orders" class="big-number"></div>
+            </div>
+            <div class="calc-result" style="margin-top:0">
+              <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em">Ticket médio</div>
+              <div id="fin-ticket" class="big-number"></div>
+            </div>
+          </div>
+          <h3 style="font-size:18px;margin-bottom:10px">Produtos que mais faturaram no período</h3>
+          <div id="fin-top-items"></div>
+        </div>
+      </section>
+
+      <section id="panel-explore" hidden>
+        <h2 style="font-size:24px;margin-bottom:14px">Explorar categorias do Mercado Livre</h2>
+        <div id="explore-breadcrumb" class="explore-breadcrumb"></div>
+        <div id="explore-current" class="explore-current" hidden></div>
+        <div id="explore-status" class="status">Carregando categorias…</div>
+        <div id="explore-grid" class="explore-grid" hidden></div>
+      </section>
+
+      <section id="panel-calc" hidden>
+        <form id="calc-form" class="calc-form">
+          <h2>Calculadora de margem</h2>
+          <label>Preço de venda (R$)<input type="number" step="0.01" name="price" required /></label>
+          <label>Custo do produto (R$)<input type="number" step="0.01" name="productCost" required /></label>
+          <label>Comissão do ML (%)<input type="number" step="0.01" name="mlCommissionPercent" required /></label>
+          <label>Frete que você paga (R$)<input type="number" step="0.01" name="shippingCost" value="0" /></label>
+          <label>Tarifa fixa (R$)<input type="number" step="0.01" name="fixedFee" value="0" /></label>
+          <label>Imposto sobre a venda (%)<input type="number" step="0.01" name="taxPercent" value="0" /></label>
+          <label>Custo de Ads (%)<input type="number" step="0.01" name="adsCostPercent" value="0" /></label>
+          <button type="submit" class="btn-primary">Calcular</button>
+        </form>
+        <div id="calc-result" class="calc-result"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="diagnosis-modal" class="modal" hidden>
+    <div class="modal-content">
+      <button id="modal-close" class="modal-close">&times;</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
