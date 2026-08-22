@@ -89,7 +89,7 @@ async function getItemsLight(itemIds, accessToken) {
     const { data } = await api.get('/items', {
       params: {
         ids: chunk.join(','),
-        attributes: 'id,category_id,available_quantity,sold_quantity,listing_type_id,price'
+        attributes: 'id,title,category_id,available_quantity,sold_quantity,listing_type_id,price'
       }
     });
     results.push(...data.map((r) => r.body));

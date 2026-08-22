@@ -350,10 +350,11 @@ document.getElementById('global-tax').addEventListener('input', onGlobalSettings
 let loadedItems = [];
 let currentOffset = 0;
 let totalItems = null;
-const activeFilters = { category: '', stock: '', listingType: '', sortBy: '' };
+const activeFilters = { search: '', category: '', stock: '', listingType: '', sortBy: '' };
 
 function buildQueryString(offset) {
   const params = new URLSearchParams({ offset: String(offset), limit: '30' });
+  if (activeFilters.search) params.set('search', activeFilters.search);
   if (activeFilters.category) params.set('category', activeFilters.category);
   if (activeFilters.stock) params.set('stock', activeFilters.stock);
   if (activeFilters.listingType) params.set('listingType', activeFilters.listingType);
@@ -409,6 +410,41 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   }
   window.location.href = '/login.html';
 });
+
+// Busca qualquer anúncio da conta por título ou ID, não apenas os cards já carregados.
+(function initItemSearch() {
+  const stockFilter = document.getElementById('filter-stock');
+  if (!stockFilter || document.getElementById('item-search')) return;
+
+  const searchBox = document.createElement('div');
+  searchBox.className = stockFilter.parentElement?.className || '';
+  searchBox.innerHTML = `
+    <label for="item-search">BUSCAR ANÚNCIO</label>
+    <input id="item-search" type="search" placeholder="Título ou MLB..." autocomplete="off"
+      style="width:100%;min-width:220px;background:#0c0c0c;color:#fff;border:1px solid #333;padding:10px 12px;border-radius:3px" />`;
+
+  const parent = stockFilter.parentElement?.parentElement;
+  if (parent) parent.insertBefore(searchBox, stockFilter.parentElement);
+
+  const input = searchBox.querySelector('#item-search');
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      activeFilters.search = input.value.trim();
+      loadItems(true);
+    }, 350);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      clearTimeout(timer);
+      activeFilters.search = input.value.trim();
+      loadItems(true);
+    }
+  });
+})();
 
 document.getElementById('filter-stock').addEventListener('change', (e) => {
   activeFilters.stock = e.target.value;
@@ -498,6 +534,7 @@ async function loadItems(isFirstPage = true) {
             <div class="item-card-footer item-card-footer-actions">
               <button class="link-btn conversion-btn" data-conversion-id="${item.id}">Conversão</button>
               <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
+              <button class="link-btn price-race-btn" data-price-race-id="${item.id}">Corrida de preço</button>
               <button class="link-btn reviews-btn" data-reviews-id="${item.id}">Avaliações</button>
               <button class="link-btn" data-id="${item.id}">Diagnóstico</button>
             </div>
@@ -526,6 +563,14 @@ async function loadItems(isFirstPage = true) {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         openCompetitionRadar(btn.dataset.radarId);
+      });
+    });
+
+    grid.querySelectorAll('.price-race-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPriceRace(btn.dataset.priceRaceId);
       });
     });
 
@@ -742,6 +787,124 @@ async function openCompetitionRadar(itemId) {
   } catch (err) {
     body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">Erro ao consultar o Radar. Veja o console para detalhes.</p>`;
     console.error(err);
+  }
+}
+
+function minimumPriceForMargin(cost, commissionPct, taxPct, targetMarginPct) {
+  const c = Number(cost);
+  const rate = (Number(commissionPct || 0) + Number(taxPct || 0) + Number(targetMarginPct || 0)) / 100;
+  if (!Number.isFinite(c) || c < 0 || rate >= 1) return null;
+  return c / (1 - rate);
+}
+
+async function openPriceRace(itemId) {
+  const modal = document.getElementById('diagnosis-modal') || document.querySelector('.diagnosis-modal');
+  const body = document.getElementById('modal-body') || modal?.querySelector('.modal-body');
+  if (!modal || !body) {
+    alert('Não foi possível abrir a Corrida de Preço. Atualize a página e tente novamente.');
+    return;
+  }
+
+  body.innerHTML = '<h2>Corrida de Preço</h2><p>Comparando sua posição com preços observados no mercado…</p>';
+  modal.hidden = false;
+
+  try {
+    const cost = getItemCost(itemId);
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/competition-radar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productCost: cost === null ? '' : cost,
+        mlCommissionPercent: globalSettings.commission,
+        taxPercent: globalSettings.tax,
+        shippingCost: 0,
+        fixedFee: 0,
+        adsCostPercent: 0
+      })
+    });
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `<h2>Corrida de Preço</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao consultar preços.')}</p>`;
+      return;
+    }
+
+    const current = Number(data.item?.price || 0);
+    const competitors = [...(data.market?.competitors || [])]
+      .filter((c) => Number(c.price) > 0)
+      .sort((a, b) => Number(a.price) - Number(b.price));
+    const prices = competitors.map((c) => Number(c.price));
+    const rank = 1 + prices.filter((p) => p < current).length;
+    const totalRace = competitors.length + 1;
+    const nearestBelow = [...prices].filter((p) => p < current).sort((a, b) => b - a)[0] ?? null;
+    const nearestAbove = prices.filter((p) => p > current).sort((a, b) => a - b)[0] ?? null;
+    const official = data.officialCompetition || {};
+    const priceToWin = official.priceToWin != null ? Number(official.priceToWin) : null;
+
+    const floor10 = cost === null ? null : minimumPriceForMargin(cost, globalSettings.commission, globalSettings.tax, 10);
+    const floor20 = cost === null ? null : minimumPriceForMargin(cost, globalSettings.commission, globalSettings.tax, 20);
+
+    let signal = 'Preço no meio da amostra. Compare valor percebido antes de alterar.';
+    if (competitors.length) {
+      if (rank <= Math.max(2, Math.ceil(totalRace * 0.25))) signal = 'Você já está entre os menores preços da amostra. Cortar mais pode apenas reduzir margem.';
+      else if (rank >= Math.ceil(totalRace * 0.75)) signal = 'Seu preço está entre os mais altos da amostra. Verifique se frete, reputação e oferta justificam o prêmio.';
+      else signal = 'Seu preço está na faixa intermediária. Uma pequena diferença pode ser suficiente, mas preço não é o único fator de conversão.';
+    }
+
+    const rows = competitors.slice(0, 8).map((c, idx) => {
+      const p = Number(c.price);
+      const diff = p - current;
+      return `<div class="radar-competitor">
+        <div><strong>#${idx + 1} ${escapeHtml(c.title || 'Concorrente')}</strong><span>${c.free_shipping ? 'Frete grátis' : 'Frete não identificado'}${c.sold_quantity != null ? ` · ${Number(c.sold_quantity).toLocaleString('pt-BR')} vendidos*` : ''}</span></div>
+        <strong>${formatMoney(p)}<br><small style="font-weight:400;color:var(--text-dim)">${diff === 0 ? 'mesmo preço' : diff < 0 ? `${formatMoney(Math.abs(diff))} abaixo` : `${formatMoney(diff)} acima`}</small></strong>
+      </div>`;
+    }).join('');
+
+    const officialHtml = priceToWin != null ? `
+      <div class="check-row ${priceToWin < current ? 'check-alerta' : 'check-info'}">
+        <strong>Preço oficial para ganhar:</strong> ${formatMoney(priceToWin)}
+        ${priceToWin < current ? ` · ${formatMoney(current - priceToWin)} abaixo do seu preço` : ''}
+      </div>` : '<div class="check-row check-info">Este anúncio não possui <strong>price_to_win</strong> oficial. A comparação abaixo usa uma amostra de anúncios similares.</div>';
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.item?.title || 'Corrida de Preço')}</h2>
+      <p class="radar-subtitle">Corrida de Preço · ${escapeHtml(itemId)}</p>
+
+      <section class="radar-section">
+        <div class="radar-section-title">Sua posição por preço</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Seu preço</span><strong>${formatMoney(current)}</strong></div>
+          <div><span>Posição na amostra</span><strong>${competitors.length ? `${rank}º de ${totalRace}` : '—'}</strong></div>
+          <div><span>Logo abaixo</span><strong>${nearestBelow != null ? formatMoney(nearestBelow) : '—'}</strong></div>
+          <div><span>Logo acima</span><strong>${nearestAbove != null ? formatMoney(nearestAbove) : '—'}</strong></div>
+        </div>
+        ${officialHtml}
+        <div class="check-row check-info">${escapeHtml(signal)}</div>
+      </section>
+
+      <section class="radar-section">
+        <div class="radar-section-title">Proteção contra guerra de preço</div>
+        ${cost === null ? '<div class="check-row check-alerta">Informe o custo no card para calcular pisos de preço por margem.</div>' : `
+          <div class="radar-metrics">
+            <div><span>Piso p/ margem 10%</span><strong>${floor10 ? formatMoney(floor10) : '—'}</strong></div>
+            <div><span>Piso p/ margem 20%</span><strong>${floor20 ? formatMoney(floor20) : '—'}</strong></div>
+            <div><span>Custo informado</span><strong>${formatMoney(cost)}</strong></div>
+          </div>
+          ${priceToWin && floor10 && priceToWin < floor10 ? '<div class="radar-warning">O preço para ganhar fica abaixo do piso estimado para 10% de margem. Não entre nessa corrida sem revisar custos/frete.</div>' : ''}
+          <p class="radar-note">Pisos rápidos usam custo + comissão + imposto. Não incluem frete, tarifa fixa nem Ads; portanto são uma proteção mínima, não o preço final ideal.</p>`}
+      </section>
+
+      <section class="radar-section">
+        <div class="radar-section-title">Concorrentes observados</div>
+        ${rows || '<div class="check-row check-alerta">Não encontrei amostra suficiente para ordenar concorrentes.</div>'}
+        <p class="radar-footnote">*Amostra de busca do Mercado Livre; anúncios podem variar em marca, kit, condição e características. Menor preço não significa necessariamente melhor conversão.</p>
+      </section>`;
+  } catch (err) {
+    console.error('[Corrida de Preço]', err);
+    body.innerHTML = '<h2>Corrida de Preço</h2><p class="check-critico">Erro ao consultar a comparação de preços.</p>';
   }
 }
 

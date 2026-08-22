@@ -11,6 +11,7 @@ const router = express.Router();
 const MAX_ITEMS_PER_PAGE = 30;
 const CONCURRENCY = 4;
 const LIGHT_INDEX_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const LIGHT_INDEX_VERSION = 2; // inclui title para busca de anúncios
 
 /**
  * Roda uma função assíncrona sobre uma lista, mas no máximo `concurrency`
@@ -42,18 +43,28 @@ async function mapWithConcurrency(items, concurrency, fn) {
 async function getLightIndex(req) {
   const { access_token, user_id } = req.session.ml;
   const cached = req.session.ml.lightIndex;
-  if (cached && Date.now() - cached.fetchedAt < LIGHT_INDEX_TTL_MS) {
+  if (cached && cached.version === LIGHT_INDEX_VERSION && Date.now() - cached.fetchedAt < LIGHT_INDEX_TTL_MS) {
     return cached.items;
   }
 
   const ids = await mlClient.getUserItemIds(user_id, access_token);
   const items = ids.length > 0 ? await mlClient.getItemsLight(ids, access_token) : [];
-  req.session.ml.lightIndex = { items, fetchedAt: Date.now() };
+  req.session.ml.lightIndex = { items, fetchedAt: Date.now(), version: LIGHT_INDEX_VERSION };
   return items;
 }
 
 function applyFilters(items, query) {
   let filtered = items;
+
+  if (query.search) {
+    const term = String(query.search).trim().toLowerCase();
+    if (term) {
+      filtered = filtered.filter((i) =>
+        String(i.id || '').toLowerCase().includes(term) ||
+        String(i.title || '').toLowerCase().includes(term)
+      );
+    }
+  }
 
   if (query.category) {
     filtered = filtered.filter((i) => i.category_id === query.category);
@@ -80,7 +91,7 @@ function applyFilters(items, query) {
 
 // Lista os anúncios do usuário logado, já com visitas dos últimos 30 dias
 // e diagnóstico calculado. Suporta paginação via ?offset=&limit=, e filtros
-// via ?category=&stock=zero|available&listingType=classic|premium&sortBy=most_sold.
+// via ?search=&category=&stock=zero|available&listingType=classic|premium&sortBy=most_sold.
 router.get('/items', requireAuth, async (req, res) => {
   try {
     const { access_token } = req.session.ml;
