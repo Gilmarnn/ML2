@@ -411,6 +411,173 @@ router.post('/items/:id/competition-radar', requireAuth, async (req, res) => {
   }
 });
 
+
+// Motor de Conversão: cruza visitas + pedidos pagos + competição/preço.
+// Não promete causalidade: classifica sinais observáveis para orientar a próxima ação.
+router.get('/items/:id/conversion-engine', requireAuth, async (req, res) => {
+  try {
+    const { access_token, user_id } = req.session.ml;
+    const [item] = await mlClient.getItemsDetails([req.params.id], access_token);
+    if (!item) return res.status(404).json({ error: 'Anúncio não encontrado.' });
+
+    // Uma janela única de 60 dias permite comparar 30d atuais x 30d anteriores.
+    const visits60 = await mlClient.getItemVisits(item.id, access_token, 60).catch(() => null);
+    const visitRows = Array.isArray(visits60?.results) ? visits60.results : [];
+    const sortedVisits = [...visitRows].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const currentVisitRows = sortedVisits.slice(-30);
+    const previousVisitRows = sortedVisits.slice(-60, -30);
+    const sumVisits = (rows) => rows.reduce((sum, r) => sum + Number(r.total || 0), 0);
+    const currentVisits = sumVisits(currentVisitRows);
+    const previousVisits = sumVisits(previousVisitRows);
+
+    const now = new Date();
+    const from60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const cutoff30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const orders = await mlClient.getOrders(user_id, access_token, {
+      fromDate: from60.toISOString(),
+      toDate: now.toISOString(),
+      maxOrders: 1000,
+      itemId: item.id
+    });
+
+    function aggregateOrders(from, to) {
+      let units = 0;
+      let revenue = 0;
+      let ordersCount = 0;
+      for (const order of orders) {
+        const date = new Date(order.date_created || order.date_closed || 0);
+        if (!(date >= from && date < to)) continue;
+        let matched = false;
+        for (const oi of order.order_items || []) {
+          if (oi.item?.id !== item.id) continue;
+          matched = true;
+          const q = Number(oi.quantity || 0);
+          units += q;
+          revenue += Number(oi.unit_price || 0) * q;
+        }
+        if (matched) ordersCount += 1;
+      }
+      return { units, revenue: Number(revenue.toFixed(2)), orders: ordersCount };
+    }
+
+    const currentSales = aggregateOrders(cutoff30, new Date(now.getTime() + 1000));
+    const previousSales = aggregateOrders(from60, cutoff30);
+    const conversion = currentVisits > 0 ? (currentSales.units / currentVisits) * 100 : null;
+    const previousConversion = previousVisits > 0 ? (previousSales.units / previousVisits) * 100 : null;
+    const conversionChange = conversion != null && previousConversion != null && previousConversion > 0
+      ? ((conversion - previousConversion) / previousConversion) * 100
+      : null;
+    const visitsChange = previousVisits > 0 ? ((currentVisits - previousVisits) / previousVisits) * 100 : null;
+    const unitsChange = previousSales.units > 0 ? ((currentSales.units - previousSales.units) / previousSales.units) * 100 : null;
+
+    const competition = await mlClient.getPriceToWin(item.id, access_token).catch(() => null);
+    const priceToWin = competition?.price_to_win != null ? Number(competition.price_to_win) : null;
+    const currentPrice = Number(item.price || 0);
+    const priceGapPct = priceToWin && currentPrice > 0
+      ? ((currentPrice - priceToWin) / currentPrice) * 100
+      : null;
+
+    const signals = [];
+    const actions = [];
+    let classification = 'OBSERVAR';
+    let priority = 'MÉDIA';
+
+    // Regras heurísticas Visium. São sinais de decisão, não benchmarks oficiais do ML.
+    if (currentVisits < 20) {
+      signals.push('Pouco tráfego para concluir se o anúncio converte bem ou mal.');
+      actions.push('Acumule mais visitas antes de fazer mudanças agressivas de preço.');
+      classification = 'OBSERVAR';
+      priority = 'BAIXA';
+    } else if (conversion != null && conversion >= 2.5 && currentVisits < 250) {
+      signals.push(`Boa resposta ao tráfego: ${conversion.toFixed(2)} vendas estimadas a cada 100 visitas.`);
+      actions.push('Candidato a ganhar mais exposição: teste aumento de tráfego/Ads sem alterar preço de imediato.');
+      classification = 'ESCALAR';
+      priority = 'ALTA';
+    } else if (currentVisits >= 100 && (conversion == null || conversion < 0.8)) {
+      signals.push('O anúncio recebe tráfego, mas transforma poucas visitas em vendas.');
+      actions.push('Priorize Radar, preço, frete, avaliações e qualidade da oferta antes de comprar mais tráfego.');
+      classification = 'OTIMIZAR';
+      priority = 'ALTA';
+    } else if (conversion != null && conversion >= 1.5) {
+      signals.push(`Conversão estimada saudável para este anúncio no período: ${conversion.toFixed(2)}%.`);
+      actions.push('Preserve os elementos atuais e monitore preço/competitividade antes de alterações grandes.');
+      classification = 'DEFENDER';
+      priority = 'MÉDIA';
+    } else {
+      signals.push('O anúncio tem dados suficientes, mas ainda não apresenta um sinal forte de escala.');
+      actions.push('Teste uma melhoria por vez e compare a conversão nos próximos 7–14 dias.');
+    }
+
+    if (conversionChange != null && conversionChange <= -30) {
+      signals.push(`Conversão caiu ${Math.abs(conversionChange).toFixed(0)}% contra os 30 dias anteriores.`);
+      actions.unshift('Investigue primeiro o que mudou: preço, concorrência, frete, avaliações ou estoque.');
+      if (classification === 'ESCALAR' || classification === 'DEFENDER') classification = 'OTIMIZAR';
+      priority = 'ALTA';
+    } else if (conversionChange != null && conversionChange >= 30) {
+      signals.push(`Conversão subiu ${conversionChange.toFixed(0)}% contra os 30 dias anteriores.`);
+    }
+
+    if (priceGapPct != null && priceGapPct >= 2) {
+      signals.push(`O preço para ganhar no catálogo está cerca de ${priceGapPct.toFixed(1)}% abaixo do preço atual.`);
+      actions.push('Abra o Radar antes de reduzir preço e valide se a margem continua aceitável.');
+    } else if (competition?.status === 'winning' || competition?.status === 'sharing_first_place') {
+      signals.push('O anúncio está competitivo no catálogo; preço não parece ser o primeiro gargalo.');
+    }
+
+    if (!item.shipping?.free_shipping && currentVisits >= 100 && conversion != null && conversion < 1.5) {
+      signals.push('Sem frete grátis em um anúncio com tráfego relevante e conversão moderada/baixa.');
+      actions.push('Simule o impacto de frete grátis/benefício logístico antes de reduzir preço.');
+    }
+
+    res.json({
+      item: {
+        id: item.id,
+        title: item.title,
+        price: currentPrice,
+        freeShipping: Boolean(item.shipping?.free_shipping),
+        listingTypeId: item.listing_type_id
+      },
+      current: {
+        days: 30,
+        visits: currentVisits,
+        units: currentSales.units,
+        orders: currentSales.orders,
+        revenue: currentSales.revenue,
+        conversion: conversion == null ? null : Number(conversion.toFixed(2))
+      },
+      previous: {
+        days: 30,
+        visits: previousVisits,
+        units: previousSales.units,
+        orders: previousSales.orders,
+        revenue: previousSales.revenue,
+        conversion: previousConversion == null ? null : Number(previousConversion.toFixed(2))
+      },
+      trend: {
+        conversionChangePct: conversionChange == null ? null : Number(conversionChange.toFixed(1)),
+        visitsChangePct: visitsChange == null ? null : Number(visitsChange.toFixed(1)),
+        unitsChangePct: unitsChange == null ? null : Number(unitsChange.toFixed(1))
+      },
+      competition: {
+        status: competition?.status || null,
+        priceToWin,
+        priceGapPct: priceGapPct == null ? null : Number(priceGapPct.toFixed(1))
+      },
+      decision: {
+        classification,
+        priority,
+        signals,
+        actions: [...new Set(actions)].slice(0, 5),
+        note: 'Classificação heurística do Visium baseada em visitas, vendas e competitividade; não é benchmark oficial do Mercado Livre.'
+      },
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[api/items/:id/conversion-engine]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao montar o Motor de Conversão.' });
+  }
+});
+
 // Voz do Cliente: avaliações reais do produto via API oficial de Reviews.
 // É leitura apenas; serve para descobrir satisfação, distribuição de estrelas e
 // comentários recentes sem depender de IA.

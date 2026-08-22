@@ -211,24 +211,27 @@ async function getItemReviews(itemId, accessToken, { offset = 0, limit = 10, cat
   return data;
 }
 
-async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 300 } = {}) {
+async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 300, itemId = null } = {}) {
   const api = client(accessToken);
   const orders = [];
   let offset = 0;
   const limit = 50;
 
   while (orders.length < maxOrders) {
-    const { data } = await api.get('/orders/search', {
-      params: {
-        seller: userId,
-        'order.status': 'paid',
-        'order.date_created.from': fromDate,
-        'order.date_created.to': toDate,
-        sort: 'date_desc',
-        offset,
-        limit
-      }
-    });
+    const params = {
+      seller: userId,
+      'order.status': 'paid',
+      'order.date_created.from': fromDate,
+      'order.date_created.to': toDate,
+      sort: 'date_desc',
+      offset,
+      limit
+    };
+    // O filtro q da busca de orders aceita ID do item e reduz drasticamente
+    // o volume de dados quando o Motor de Conversão analisa um anúncio.
+    if (itemId) params.q = itemId;
+
+    const { data } = await api.get('/orders/search', { params });
 
     orders.push(...(data.results || []));
     if (!data.results || data.results.length < limit || orders.length >= data.paging.total) break;

@@ -496,6 +496,7 @@ async function loadItems(isFirstPage = true) {
             </div>
             <div class="item-card-profit-wrap">${renderProfit(item.price, savedCost, globalSettings.commission, globalSettings.tax)}</div>
             <div class="item-card-footer item-card-footer-actions">
+              <button class="link-btn conversion-btn" data-conversion-id="${item.id}">Conversão</button>
               <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
               <button class="link-btn reviews-btn" data-reviews-id="${item.id}">Avaliações</button>
               <button class="link-btn" data-id="${item.id}">Diagnóstico</button>
@@ -510,6 +511,14 @@ async function loadItems(isFirstPage = true) {
     grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
+    });
+
+    grid.querySelectorAll('.conversion-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openConversionEngine(btn.dataset.conversionId);
+      });
     });
 
     grid.querySelectorAll('.radar-btn:not([data-bound])').forEach((btn) => {
@@ -739,6 +748,87 @@ async function openCompetitionRadar(itemId) {
 function reviewStars(rate) {
   const value = Math.max(0, Math.min(5, Math.round(Number(rate || 0))));
   return `${'★'.repeat(value)}${'☆'.repeat(5 - value)}`;
+}
+
+
+function fmtPct(value) {
+  return value == null ? '—' : `${Number(value).toFixed(1)}%`;
+}
+function fmtMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+}
+function trendArrow(value) {
+  if (value == null) return '—';
+  if (value > 0) return `↑ ${Math.abs(Number(value)).toFixed(1)}%`;
+  if (value < 0) return `↓ ${Math.abs(Number(value)).toFixed(1)}%`;
+  return '0%';
+}
+
+async function openConversionEngine(itemId) {
+  const modal = document.getElementById('modal');
+  const body = document.getElementById('modal-body');
+  modal.hidden = false;
+  body.innerHTML = '<p>Calculando conversão, vendas e tendência dos últimos 60 dias…</p>';
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/conversion-engine`);
+    const data = await res.json();
+    if (!res.ok) {
+      body.innerHTML = `<h2>Motor de Conversão</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao calcular conversão.')}</p>`;
+      return;
+    }
+
+    const d = data.decision || {};
+    const c = data.current || {};
+    const p = data.previous || {};
+    const t = data.trend || {};
+    const comp = data.competition || {};
+    const signalHtml = (d.signals || []).map((x) => `<div class="check-row check-alerta">${escapeHtml(x)}</div>`).join('');
+    const actionsHtml = (d.actions || []).map((x, i) => `<div class="check-row"><strong>${i + 1}.</strong> ${escapeHtml(x)}</div>`).join('');
+    const cls = d.classification === 'ESCALAR' ? 'radar-good' : d.classification === 'OTIMIZAR' ? 'radar-bad' : 'radar-neutral';
+
+    body.innerHTML = `
+      <h2>Motor de Conversão</h2>
+      <p class="radar-subtitle">${escapeHtml(data.item?.title || itemId)}</p>
+      <section class="radar-section">
+        <div class="radar-section-title">Decisão Visium</div>
+        <div class="radar-status ${cls}">${escapeHtml(d.classification || 'OBSERVAR')} · prioridade ${escapeHtml(d.priority || '—')}</div>
+        ${signalHtml || '<div class="check-row">Sem sinal forte no período.</div>'}
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Últimos 30 dias</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Visitas</span><strong>${Number(c.visits || 0)}</strong></div>
+          <div><span>Unidades</span><strong>${Number(c.units || 0)}</strong></div>
+          <div><span>Conversão estimada</span><strong>${fmtPct(c.conversion)}</strong></div>
+          <div><span>Faturamento</span><strong>${fmtMoney(c.revenue)}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Comparação com 30 dias anteriores</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Conversão anterior</span><strong>${fmtPct(p.conversion)}</strong></div>
+          <div><span>Variação conversão</span><strong>${trendArrow(t.conversionChangePct)}</strong></div>
+          <div><span>Variação visitas</span><strong>${trendArrow(t.visitsChangePct)}</strong></div>
+          <div><span>Variação unidades</span><strong>${trendArrow(t.unitsChangePct)}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Competitividade</div>
+        <div class="radar-metrics">
+          <div><span>Seu preço</span><strong>${fmtMoney(data.item?.price)}</strong></div>
+          <div><span>Preço para ganhar</span><strong>${comp.priceToWin != null ? fmtMoney(comp.priceToWin) : 'Sem dado oficial'}</strong></div>
+          <div><span>Status catálogo</span><strong>${escapeHtml(comp.status || '—')}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Próxima ação</div>
+        ${actionsHtml || '<div class="check-row">Continue monitorando o anúncio.</div>'}
+        <p class="radar-note">${escapeHtml(d.note || '')}</p>
+      </section>`;
+  } catch (err) {
+    body.innerHTML = '<h2>Motor de Conversão</h2><p class="check-critico">Erro de conexão ao calcular a conversão.</p>';
+  }
 }
 
 async function openReviews(itemId) {
