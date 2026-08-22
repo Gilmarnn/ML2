@@ -80,6 +80,107 @@ async function loadMarketplaceAccounts() {
   }
 }
 
+let currentDashboardTab = 'overview';
+let overviewProductsAll = [];
+let overviewCategoryFilter = '';
+let overviewCategoryName = 'Todos os anúncios';
+let overviewFocusedProductId = null;
+
+function renderOverviewInsight(product, visibleProducts) {
+  const panel = document.getElementById('overview-product-insight');
+  if (!panel) return;
+  if (!product) {
+    panel.innerHTML = '<div class="overview-insight-empty">Passe o mouse sobre um produto para ver os detalhes.</div>';
+    return;
+  }
+
+  const totalRevenue = visibleProducts.reduce((sum, p) => sum + Number(p.revenue_30d || 0), 0);
+  const share = totalRevenue > 0 ? (Number(product.revenue_30d || 0) / totalRevenue) * 100 : 0;
+  const ranked = [...visibleProducts]
+    .sort((a,b) => Number(b.revenue_30d || 0) - Number(a.revenue_30d || 0))
+    .slice(0, 5);
+  if (!ranked.some((p) => String(p.platform_product_id) === String(product.platform_product_id))) ranked.push(product);
+  const maxRevenue = Math.max(1, ...ranked.map((p) => Number(p.revenue_30d || 0)));
+
+  panel.innerHTML = `
+    <div class="overview-insight-product">
+      ${product.thumbnail ? `<img src="${escapeHtml(fixThumb(product.thumbnail))}" alt="">` : '<div class="overview-insight-thumb"></div>'}
+      <div>
+        <span class="platform-pill">${escapeHtml(platformLabel(product.platform))}</span>
+        <h3>${escapeHtml(product.title)}</h3>
+        <div class="meta">${escapeHtml(product.platform_product_id || '')}</div>
+      </div>
+    </div>
+    <div class="overview-insight-metrics">
+      <div><span>Faturamento 30d</span><strong>${formatMoney(product.revenue_30d || 0)}</strong></div>
+      <div><span>Unidades 30d</span><strong>${Number(product.units_30d || 0).toLocaleString('pt-BR')}</strong></div>
+      <div><span>Preço</span><strong>${formatMoney(product.price || 0)}</strong></div>
+      <div><span>Estoque</span><strong>${Number(product.stock || 0).toLocaleString('pt-BR')}</strong></div>
+    </div>
+    <div class="overview-share">
+      <div class="overview-share-head"><span>Participação no faturamento exibido</span><strong>${share.toFixed(1).replace('.', ',')}%</strong></div>
+      <div class="overview-share-track"><span style="width:${Math.min(100, share)}%"></span></div>
+    </div>
+    <div class="overview-mini-chart-title">Faturamento · principais produtos</div>
+    <div class="overview-mini-chart">
+      ${ranked.map((p, i) => {
+        const isActive = String(p.platform_product_id) === String(product.platform_product_id);
+        const width = Math.max(4, (Number(p.revenue_30d || 0) / maxRevenue) * 100);
+        return `<div class="overview-chart-row ${isActive ? 'active' : ''}">
+          <span class="overview-chart-label">${i + 1}. ${escapeHtml(p.title)}</span>
+          <div class="overview-chart-track"><span style="width:${width}%"></span></div>
+          <strong>${formatMoney(p.revenue_30d || 0)}</strong>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function renderOverviewProducts() {
+  const list = document.getElementById('unified-products');
+  const title = document.getElementById('overview-products-title');
+  if (!list) return;
+
+  const filtered = overviewCategoryFilter
+    ? overviewProductsAll.filter((p) => String(p.category_id || '') === String(overviewCategoryFilter))
+    : overviewProductsAll;
+  const visible = filtered.slice(0, 20);
+
+  if (title) title.textContent = overviewCategoryFilter
+    ? `Desempenho · ${overviewCategoryName} · últimos 30 dias`
+    : 'Desempenho dos produtos · últimos 30 dias';
+
+  list.innerHTML = visible.length ? visible.map((p) => `
+    <div class="unified-product overview-product-row" tabindex="0" data-product-id="${escapeHtml(String(p.platform_product_id || ''))}">
+      ${p.thumbnail ? `<img src="${escapeHtml(fixThumb(p.thumbnail))}" alt="">` : '<div></div>'}
+      <div>
+        <strong>${escapeHtml(p.title)}</strong>
+        <div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')} · preço ${formatMoney(p.price || 0)}</div>
+        <div class="meta"><strong>${Number(p.units_30d || 0).toLocaleString('pt-BR')} un.</strong> nos últimos 30 dias · <strong>${formatMoney(p.revenue_30d || 0)}</strong> faturados</div>
+      </div>
+      <span class="platform-pill">${escapeHtml(platformLabel(p.platform))}</span>
+      <strong>${formatMoney(p.revenue_30d || 0)}</strong>
+    </div>`).join('') : '<div class="status">Nenhum produto dessa categoria no período sincronizado.</div>';
+
+  const preferred = visible.find((p) => String(p.platform_product_id) === String(overviewFocusedProductId)) || visible[0] || null;
+  overviewFocusedProductId = preferred?.platform_product_id || null;
+  renderOverviewInsight(preferred, visible);
+
+  list.querySelectorAll('.overview-product-row').forEach((row) => {
+    const focus = () => {
+      const p = visible.find((item) => String(item.platform_product_id) === row.dataset.productId);
+      if (!p) return;
+      overviewFocusedProductId = p.platform_product_id;
+      list.querySelectorAll('.overview-product-row').forEach((el) => el.classList.toggle('active', el === row));
+      renderOverviewInsight(p, visible);
+    };
+    row.addEventListener('mouseenter', focus);
+    row.addEventListener('focus', focus);
+  });
+
+  const activeRow = list.querySelector(`[data-product-id="${CSS.escape(String(overviewFocusedProductId || ''))}"]`);
+  if (activeRow) activeRow.classList.add('active');
+}
+
 async function loadOverview() {
   const status = document.getElementById('overview-status');
   const content = document.getElementById('overview-content');
@@ -90,7 +191,7 @@ async function loadOverview() {
     const query = activeMarketplaceAccountId ? `?accountId=${encodeURIComponent(activeMarketplaceAccountId)}` : '';
     const [overviewRes, productsRes] = await Promise.all([
       nativeFetch(`/api/unified/overview${query}`),
-      nativeFetch(`/api/unified/products${query}${query ? '&' : '?'}limit=20`)
+      nativeFetch(`/api/unified/products${query}${query ? '&' : '?'}limit=200`)
     ]);
     const overview = await overviewRes.json();
     const productData = await productsRes.json();
@@ -99,18 +200,8 @@ async function loadOverview() {
     document.getElementById('overview-orders').textContent = Number(overview.last30Days?.orderCount || 0).toLocaleString('pt-BR');
     document.getElementById('overview-ticket').textContent = formatMoney(overview.last30Days?.averageTicket || 0);
     document.getElementById('overview-accounts').textContent = overview.accounts?.length || 0;
-    const products = productData.products || [];
-    document.getElementById('unified-products').innerHTML = products.length ? products.map((p) => `
-      <div class="unified-product">
-        ${p.thumbnail ? `<img src="${escapeHtml(fixThumb(p.thumbnail))}" alt="">` : '<div></div>'}
-        <div>
-          <strong>${escapeHtml(p.title)}</strong>
-          <div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')} · preço ${formatMoney(p.price || 0)}</div>
-          <div class="meta"><strong>${Number(p.units_30d || 0).toLocaleString('pt-BR')} un.</strong> nos últimos 30 dias · <strong>${formatMoney(p.revenue_30d || 0)}</strong> faturados</div>
-        </div>
-        <span class="platform-pill">${escapeHtml(platformLabel(p.platform))}</span>
-        <strong>${formatMoney(p.revenue_30d || 0)}</strong>
-      </div>`).join('') : '<div class="status">Nenhum produto sincronizado ainda. Use “Sincronizar conta ativa”.</div>';
+    overviewProductsAll = productData.products || [];
+    renderOverviewProducts();
     status.hidden = true;
     content.hidden = false;
   } catch (err) {
@@ -214,6 +305,7 @@ tabCalc.addEventListener('click', () => switchTab('calc'));
 let questionsLoadedOnce = false;
 
 function switchTab(tab) {
+  currentDashboardTab = tab;
   if (activeMarketplacePlatform !== 'mercadolivre' && ['items','questions','financials','explore'].includes(tab)) tab = 'overview';
   panelOverview.hidden = tab !== 'overview';
   panelItems.hidden = tab !== 'items';
@@ -394,7 +486,10 @@ async function loadCategories() {
         list.querySelectorAll('.category-item').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         activeFilters.category = btn.dataset.category;
-        loadItems(true);
+        overviewCategoryFilter = btn.dataset.category;
+        overviewCategoryName = btn.querySelector('span span[title]')?.textContent?.trim() || (btn.dataset.category ? 'Categoria' : 'Todos os anúncios');
+        if (currentDashboardTab === 'overview') renderOverviewProducts();
+        else loadItems(true);
       });
     });
   } catch (err) {

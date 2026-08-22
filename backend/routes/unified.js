@@ -49,7 +49,8 @@ router.get('/products', requireUser, async (req, res) => {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
 
   const productsResult = await pool.query(`SELECT up.id,up.account_id,up.platform,up.platform_product_id,up.title,up.price,up.currency,up.stock,
-      up.status,up.thumbnail,up.sold_quantity,up.score,up.profitability_margin,up.last_synced_at,ma.account_name
+      up.status,up.thumbnail,up.sold_quantity,up.score,up.profitability_margin,up.last_synced_at,ma.account_name,
+      (up.raw_data->>'category_id') AS category_id
     FROM unified_products up JOIN marketplace_accounts ma ON ma.id=up.account_id
     WHERE ${where} ORDER BY up.sold_quantity DESC,up.last_synced_at DESC NULLS LAST`, params);
 

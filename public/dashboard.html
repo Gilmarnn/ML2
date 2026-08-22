@@ -22,7 +22,7 @@
 
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-title">Categorias</div>
+      <div class="sidebar-title">Filtrar por categoria</div>
       <nav id="category-list" class="category-list">
         <button class="category-item active" data-category="">
           <span>Todos os anúncios</span>
@@ -62,8 +62,15 @@
             <div class="overview-card"><span>Ticket médio</span><strong id="overview-ticket">R$ 0,00</strong></div>
             <div class="overview-card"><span>Contas conectadas</span><strong id="overview-accounts">0</strong></div>
           </div>
-          <h3 class="overview-section-title">Desempenho dos produtos · últimos 30 dias</h3>
-          <div id="unified-products" class="unified-products"></div>
+          <div class="overview-workspace">
+            <div class="overview-products-column">
+              <h3 id="overview-products-title" class="overview-section-title">Desempenho dos produtos · últimos 30 dias</h3>
+              <div id="unified-products" class="unified-products"></div>
+            </div>
+            <aside id="overview-product-insight" class="overview-product-insight" aria-live="polite">
+              <div class="overview-insight-empty">Passe o mouse sobre um produto para ver os detalhes.</div>
+            </aside>
+          </div>
         </div>
       </section>
 
