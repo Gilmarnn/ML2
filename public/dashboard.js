@@ -627,6 +627,7 @@ async function loadItems(isFirstPage = true) {
             </div>
             <div class="item-card-profit-wrap">${renderProfit(item.price, savedCost, globalSettings.commission, globalSettings.tax)}</div>
             <div class="item-card-footer item-card-footer-actions">
+              <button class="link-btn ads-intelligence-btn" data-ads-id="${item.id}">Publicidade</button>
               <button class="link-btn conversion-btn" data-conversion-id="${item.id}">Conversão</button>
               <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
               <button class="link-btn price-race-btn" data-price-race-id="${item.id}">Corrida de preço</button>
@@ -643,6 +644,11 @@ async function loadItems(isFirstPage = true) {
     grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
+    });
+
+    grid.querySelectorAll('.ads-intelligence-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => { e.stopPropagation(); openAdsIntelligence(btn.dataset.adsId); });
     });
 
     grid.querySelectorAll('.conversion-btn:not([data-bound])').forEach((btn) => {
@@ -768,6 +774,33 @@ function renderRadarMargin(label, result) {
       <span>${escapeHtml(label)}</span>
       <strong class="${cls}">${formatMoney(result.netProfit)} · ${Number(result.marginPercent).toFixed(1)}%</strong>
     </div>`;
+}
+
+
+function adsVerdictClass(verdict) {
+  if (['APTO PARA ESCALAR','APTO PARA TESTE','ESCALAR ORÇAMENTO'].includes(verdict)) return 'radar-good';
+  if (['NÃO INVESTIR','REDUZIR / CORRIGIR ADS','OTIMIZAR ANTES'].includes(verdict)) return 'radar-bad';
+  return 'radar-neutral';
+}
+
+async function openAdsIntelligence(itemId) {
+  const modal=document.getElementById('diagnosis-modal')||document.querySelector('.diagnosis-modal');
+  const body=document.getElementById('modal-body')||modal?.querySelector('.modal-body');
+  if(!modal||!body)return;
+  const cost=getItemCost(itemId);
+  body.innerHTML='<h2>Publicidade Inteligente</h2><p>Cruzando margem, conversão, concorrência e Product Ads…</p>';
+  modal.hidden=false;
+  try {
+    const res=await fetch(`/api/items/${encodeURIComponent(itemId)}/ads-intelligence`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({productCost:cost===null?'':cost,mlCommissionPercent:globalSettings.commission,taxPercent:globalSettings.tax,shippingCost:0,fixedFee:0,targetNetMarginPercent:10})});
+    if(res.status===401)return window.location.href='/';
+    const data=await res.json();
+    if(!res.ok||data.error){body.innerHTML=`<h2>Publicidade Inteligente</h2><p class="check-critico">${escapeHtml(data.error||'Falha ao analisar publicidade.')}</p>`;return;}
+    const o=data.organic||{},e=data.economics,a=data.ads||{},m=a.metrics30d,c=a.campaign,s=data.suggestion,d=data.decision||{};
+    const econ=e?`<section class="radar-section"><div class="radar-section-title">Economia antes de Ads</div><div class="radar-metrics radar-metrics-4"><div><span>Margem pré-Ads</span><strong>${Number(e.preAdsMarginPct).toFixed(1)}%</strong></div><div><span>Lucro/unidade</span><strong>${formatMoney(e.netProfitBeforeAds)}</strong></div><div><span>Espaço para Ads</span><strong>${e.availableAdsPct>0?Number(e.availableAdsPct).toFixed(1)+'%':'Sem espaço'}</strong></div><div><span>Ads máx./venda</span><strong>${e.maxAdsPerSale!=null?formatMoney(e.maxAdsPerSale):'—'}</strong></div></div><p class="radar-note">Preservando margem líquida alvo de ${Number(e.targetNetMarginPct).toFixed(0)}%.</p></section>`:`<section class="radar-section"><div class="radar-section-title">Economia antes de Ads</div><div class="check-row check-alerta">Informe o custo no card para calcular ROAS e orçamento.</div></section>`;
+    const ads=a.enabledForAccount?`<section class="radar-section"><div class="radar-section-title">Product Ads · situação atual</div>${a.activeForItem?`<div class="radar-metrics radar-metrics-4"><div><span>Investimento 30d</span><strong>${m?formatMoney(m.cost):'—'}</strong></div><div><span>ROAS 30d</span><strong>${m?Number(m.roas||0).toFixed(2)+'x':'—'}</strong></div><div><span>ACOS 30d</span><strong>${m?Number(m.acos||0).toFixed(1)+'%':'—'}</strong></div><div><span>CVR Ads</span><strong>${m?Number(m.cvr||0).toFixed(2)+'%':'—'}</strong></div></div>${c?`<p class="radar-note">Campanha: ${escapeHtml(c.name||String(c.id))} · orçamento ${formatMoney(c.budget||0)} · ROAS alvo ${c.roasTarget!=null?Number(c.roasTarget).toFixed(2)+'x':'—'} · perda por orçamento ${c.lostByBudget!=null?Number(c.lostByBudget).toFixed(1)+'%':'—'} · por Ad Rank ${c.lostByAdRank!=null?Number(c.lostByAdRank).toFixed(1)+'%':'—'}.</p>`:''}`:'<div class="check-row check-info">Produto sem campanha Product Ads localizada. O Visium avalia se vale iniciar um teste.</div>'}</section>`:`<section class="radar-section"><div class="radar-section-title">Product Ads</div><div class="check-row check-alerta">A conta não retornou acesso ao Product Ads pela API.</div></section>`;
+    const sug=s?`<section class="radar-section"><div class="radar-section-title">Configuração sugerida</div><div class="radar-metrics radar-metrics-4"><div><span>Estratégia</span><strong>${escapeHtml(s.strategy||'PROFITABILITY')}</strong></div><div><span>ROAS alvo</span><strong>${s.roasTarget!=null?Number(s.roasTarget).toFixed(2)+'x':'—'}</strong></div><div><span>Orçamento teste</span><strong>${s.dailyBudgetTest?.from!=null?formatMoney(s.dailyBudgetTest.from)+'–'+formatMoney(s.dailyBudgetTest.to)+'/dia':'—'}</strong></div><div><span>Margem alvo</span><strong>${Number(s.targetNetMarginPct||10).toFixed(0)}%</strong></div></div><p class="radar-note">${escapeHtml(s.dailyBudgetTest?.basis||'')}</p></section>`:'';
+    body.innerHTML=`<h2>${escapeHtml(data.item.title)}</h2><p class="radar-subtitle">Publicidade Inteligente · ${escapeHtml(data.item.id)}</p><section class="radar-section"><div class="radar-section-title">Decisão Visium</div><div class="radar-status ${adsVerdictClass(d.verdict)}">${escapeHtml(d.verdict||'OBSERVAR')} · ${escapeHtml(d.priority||'MÉDIA')}</div><div class="radar-metrics radar-metrics-4"><div><span>Visitas 30d</span><strong>${Number(o.visits30d||0).toLocaleString('pt-BR')}</strong></div><div><span>Vendas 30d</span><strong>${Number(o.units30d||0).toLocaleString('pt-BR')}</strong></div><div><span>Conversão</span><strong>${o.conversion!=null?Number(o.conversion).toFixed(2)+'%':'—'}</strong></div><div><span>Estoque</span><strong>${Number(data.item.stock||0).toLocaleString('pt-BR')}</strong></div></div>${(d.signals||[]).map(x=>`<div class="check-row check-info">${escapeHtml(x)}</div>`).join('')}</section>${econ}${ads}${sug}<section class="radar-section"><div class="radar-section-title">Próximas ações</div>${(d.actions||[]).length?`<ol style="padding-left:20px;color:var(--text-dim)">${d.actions.map(x=>`<li style="margin-bottom:8px">${escapeHtml(x)}</li>`).join('')}</ol>`:'<div class="check-row check-info">Continue coletando dados.</div>'}</section>`;
+  } catch(err){console.error(err);body.innerHTML='<h2>Publicidade Inteligente</h2><p class="check-critico">Erro ao consultar os dados de Publicidade.</p>';}
 }
 
 async function openCompetitionRadar(itemId) {

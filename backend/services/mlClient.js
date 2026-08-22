@@ -241,6 +241,56 @@ async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 30
   return orders;
 }
 
+
+async function getProductAdsAdvertiser(accessToken) {
+  const api = client(accessToken);
+  try {
+    const { data } = await api.get('/advertising/advertisers', {
+      params: { product_id: 'PADS' },
+      headers: { 'Api-Version': '1', 'Content-Type': 'application/json' }
+    });
+    const advertisers = data.advertisers || [];
+    return advertisers.find((a) => a.site_id === 'MLB') || advertisers[0] || null;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+async function getProductAdsAdGroup(itemId, advertiser, accessToken) {
+  if (!advertiser?.advertiser_id || !advertiser?.site_id) return null;
+  const api = client(accessToken);
+  const { data } = await api.get(`/advertising/${advertiser.site_id}/advertisers/${advertiser.advertiser_id}/product_ads/ad_groups/search`, {
+    params: { 'filters[item_ids]': itemId },
+    headers: { 'api-version': '2' }
+  });
+  const results = data.results || [];
+  return results.find((g) => String(g.ad_group_external_id) === String(itemId)) || results[0] || null;
+}
+
+async function getProductAdsAdGroupMetrics(siteId, campaignId, adGroupId, accessToken, { dateFrom, dateTo } = {}) {
+  if (!siteId || !campaignId || !adGroupId) return null;
+  const api = client(accessToken);
+  const metrics = ['clicks','prints','cost','cpc','ctr','direct_amount','indirect_amount','total_amount','direct_units_quantity','indirect_units_quantity','units_quantity','direct_items_quantity','indirect_items_quantity','advertising_items_quantity','organic_units_quantity','organic_units_amount','organic_items_quantity','acos','tacos','sov','cvr','roas'].join(',');
+  const { data } = await api.get(`/advertising/${siteId}/product_ads/campaigns/${campaignId}/ad_groups/metrics`, {
+    params: { date_from: dateFrom, date_to: dateTo, metrics },
+    headers: { 'api-version': '2' }
+  });
+  const row = (data.results || []).find((r) => String(r.ad_group_id) === String(adGroupId));
+  return row?.metrics || null;
+}
+
+async function getProductAdsCampaign(advertiser, campaignId, accessToken, { dateFrom, dateTo } = {}) {
+  if (!advertiser?.advertiser_id || !advertiser?.site_id || !campaignId) return null;
+  const api = client(accessToken);
+  const metrics = ['clicks','prints','ctr','cost','cpc','acos','cvr','roas','sov','direct_units_quantity','indirect_units_quantity','units_quantity','direct_amount','indirect_amount','total_amount','impression_share','top_impression_share','lost_impression_share_by_budget','lost_impression_share_by_ad_rank','acos_benchmark'].join(',');
+  const { data } = await api.get(`/advertising/${advertiser.site_id}/advertisers/${advertiser.advertiser_id}/product_ads/campaigns/search`, {
+    params: { limit: 50, offset: 0, date_from: dateFrom, date_to: dateTo, metrics, 'filters[campaign_ids]': String(campaignId) },
+    headers: { 'api-version': '2' }
+  });
+  return (data.results || []).find((c) => String(c.id) === String(campaignId)) || null;
+}
+
 module.exports = {
   getUserItemIds,
   getItemsDetails,
@@ -255,5 +305,9 @@ module.exports = {
   answerQuestion,
   getOrders,
   getPriceToWin,
-  getItemReviews
+  getItemReviews,
+  getProductAdsAdvertiser,
+  getProductAdsAdGroup,
+  getProductAdsAdGroupMetrics,
+  getProductAdsCampaign
 };

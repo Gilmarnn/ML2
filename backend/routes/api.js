@@ -653,6 +653,113 @@ router.get('/items/:id/reviews', requireAuth, async (req, res) => {
   }
 });
 
+
+router.post('/items/:id/ads-intelligence', requireAuth, async (req, res) => {
+  try {
+    const { access_token, user_id } = req.session.ml;
+    const [item] = await mlClient.getItemsDetails([req.params.id], access_token);
+    if (!item) return res.status(404).json({ error: 'Anúncio não encontrado.' });
+
+    const input = req.body || {};
+    const hasCost = input.productCost !== undefined && input.productCost !== null && input.productCost !== '';
+    const commission = Number(input.mlCommissionPercent || 0);
+    const tax = Number(input.taxPercent || 0);
+    const shippingCost = Number(input.shippingCost || 0);
+    const fixedFee = Number(input.fixedFee || 0);
+    const targetNetMargin = Math.min(30, Math.max(5, Number(input.targetNetMarginPercent || 10)));
+    const now = new Date();
+    const from30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const isoDate = (d) => d.toISOString().slice(0, 10);
+
+    const [visitsData, orders, competition, advertiser] = await Promise.all([
+      mlClient.getItemVisits(item.id, access_token, 30).catch(() => null),
+      mlClient.getOrders(user_id, access_token, { fromDate: from30.toISOString(), toDate: now.toISOString(), maxOrders: 300, itemId: item.id }).catch(() => []),
+      mlClient.getPriceToWin(item.id, access_token).catch(() => null),
+      mlClient.getProductAdsAdvertiser(access_token).catch(() => null)
+    ]);
+
+    const visits = Number(visitsData?.total_visits ?? visitsData?.total ?? (Array.isArray(visitsData?.results) ? visitsData.results.reduce((s,r)=>s+Number(r.total||r.visits||0),0) : 0));
+    let units=0, revenue=0, orderCount=0;
+    for (const order of orders || []) {
+      let matched=false;
+      for (const oi of order.order_items || []) {
+        if (String(oi.item?.id) !== String(item.id)) continue;
+        matched=true;
+        const q=Number(oi.quantity||0); units += q; revenue += Number(oi.unit_price||0)*q;
+      }
+      if (matched) orderCount += 1;
+    }
+    const conversion = visits > 0 ? (units / visits) * 100 : null;
+    const currentPrice = Number(item.price || 0);
+    const priceToWin = competition?.price_to_win != null ? Number(competition.price_to_win) : null;
+    const priceGapPct = priceToWin && currentPrice > 0 ? ((currentPrice-priceToWin)/currentPrice)*100 : null;
+
+    let unitEconomics=null;
+    if (hasCost) unitEconomics = calculateMargin({ price:currentPrice, productCost:input.productCost, mlCommissionPercent:commission, shippingCost, fixedFee, taxPercent:tax, adsCostPercent:0 });
+
+    let adGroup=null, adMetrics=null, campaign=null;
+    if (advertiser) {
+      adGroup = await mlClient.getProductAdsAdGroup(item.id, advertiser, access_token).catch(()=>null);
+      if (adGroup?.campaign_id) {
+        [adMetrics,campaign] = await Promise.all([
+          mlClient.getProductAdsAdGroupMetrics(advertiser.site_id, adGroup.campaign_id, adGroup.id, access_token, {dateFrom:isoDate(from30),dateTo:isoDate(now)}).catch(()=>null),
+          mlClient.getProductAdsCampaign(advertiser, adGroup.campaign_id, access_token, {dateFrom:isoDate(from30),dateTo:isoDate(now)}).catch(()=>null)
+        ]);
+      }
+    }
+
+    const preAdsMarginPct = unitEconomics ? Number(unitEconomics.marginPercent||0) : null;
+    const availableAdsPct = preAdsMarginPct == null ? null : preAdsMarginPct - targetNetMargin;
+    const maxAdsPerSale = availableAdsPct != null && availableAdsPct > 0 ? currentPrice*(availableAdsPct/100) : null;
+    const breakEvenRoas = preAdsMarginPct != null && preAdsMarginPct > 0 ? 100/preAdsMarginPct : null;
+    const preserveMarginRoas = availableAdsPct != null && availableAdsPct > 0 ? 100/availableAdsPct : null;
+    const recommendedRoas = preserveMarginRoas != null ? Math.min(35, Math.max(1,preserveMarginRoas*1.10)) : null;
+
+    const signals=[], actions=[]; let verdict='OBSERVAR', priority='MÉDIA', eligible=false;
+    if (!hasCost) { verdict='INFORMAR CUSTO'; priority='ALTA'; signals.push('Sem custo não é possível saber quanto de Ads a margem suporta.'); actions.push('Informe o custo no card antes de definir ROAS ou orçamento.'); }
+    else if (Number(item.available_quantity||0) <= 2) { verdict='NÃO INVESTIR'; priority='ALTA'; signals.push('Estoque muito baixo para acelerar tráfego pago.'); actions.push('Reponha estoque antes de aumentar exposição.'); }
+    else if (preAdsMarginPct < 15) { verdict='NÃO INVESTIR'; priority='ALTA'; signals.push(`Margem antes de Ads é de apenas ${preAdsMarginPct.toFixed(1)}%.`); actions.push('Revise custo, preço ou comissão antes de adicionar tráfego pago.'); }
+    else if (visits >= 100 && conversion != null && conversion < 0.8) { verdict='OTIMIZAR ANTES'; priority='ALTA'; signals.push(`Recebe tráfego, mas converte só ${conversion.toFixed(2)}%.`); actions.push('Corrija oferta/preço/frete antes de pagar por mais visitas.'); }
+    else if (priceGapPct != null && priceGapPct >= 8 && competition?.status === 'competing') { verdict='OTIMIZAR ANTES'; priority='ALTA'; signals.push(`Preço está cerca de ${priceGapPct.toFixed(1)}% acima do price_to_win.`); actions.push('Valide competitividade e margem antes de ativar ou escalar Ads.'); }
+    else {
+      let score=0;
+      if (preAdsMarginPct >= 25) score += 2; else if (preAdsMarginPct >= 18) score += 1;
+      if (conversion != null && conversion >= 2.5) score += 2; else if (conversion != null && conversion >= 1.5) score += 1;
+      if (Number(item.available_quantity||0) >= 8) score += 1;
+      if (competition?.status === 'winning' || competition?.status === 'sharing_first_place') score += 1; else if (priceGapPct != null && priceGapPct <= 3) score += 1;
+      if (score >= 5) { verdict='APTO PARA ESCALAR'; priority='ALTA'; eligible=true; signals.push('Boa combinação de margem, conversão, estoque e competitividade.'); }
+      else if (score >= 3) { verdict='APTO PARA TESTE'; priority='MÉDIA'; eligible=true; signals.push('Há espaço para um teste controlado, mas ainda existem sinais a validar.'); }
+      else signals.push('Ainda não há evidência suficiente para escalar mídia com confiança.');
+    }
+
+    const campaignMetrics = campaign?.metrics || {};
+    const actualRoas = adMetrics?.roas != null ? Number(adMetrics.roas) : null;
+    const actualCost = adMetrics?.cost != null ? Number(adMetrics.cost) : null;
+    const lostBudget = campaignMetrics.lost_impression_share_by_budget != null ? Number(campaignMetrics.lost_impression_share_by_budget) : null;
+    const lostRank = campaignMetrics.lost_impression_share_by_ad_rank != null ? Number(campaignMetrics.lost_impression_share_by_ad_rank) : null;
+    if (actualRoas != null && breakEvenRoas != null && actualCost > 0) {
+      if (actualRoas < breakEvenRoas) { verdict='REDUZIR / CORRIGIR ADS'; priority='ALTA'; eligible=false; signals.unshift(`ROAS atual (${actualRoas.toFixed(2)}x) está abaixo do equilíbrio (${breakEvenRoas.toFixed(2)}x).`); actions.unshift('Não aumente orçamento; corrija campanha/oferta primeiro.'); }
+      else if (recommendedRoas != null && actualRoas >= recommendedRoas*1.2 && lostBudget != null && lostBudget >= 20) { verdict='ESCALAR ORÇAMENTO'; priority='ALTA'; eligible=true; signals.unshift('Ads entrega retorno acima do alvo e perde impressões por orçamento.'); actions.unshift('Aumente orçamento gradualmente e acompanhe ROAS/ACOS.'); }
+    }
+    if (lostRank != null && lostRank >= 30 && eligible) { signals.push(`Campanha perde ${lostRank.toFixed(1)}% das impressões por Ad Rank.`); actions.push('Teste um ROAS alvo um pouco mais agressivo, sem ultrapassar o limite econômico.'); }
+    if (actualRoas == null && eligible) actions.push('Comece com teste controlado e reavalie após dados suficientes de cliques/vendas.');
+
+    const strategy = eligible && recommendedRoas != null ? ((conversion != null && conversion >= 2.5 && preAdsMarginPct >= 25) ? 'INCREASE' : 'PROFITABILITY') : null;
+    res.json({
+      item:{id:item.id,title:item.title,price:currentPrice,stock:Number(item.available_quantity||0)},
+      organic:{visits30d:visits,units30d:units,orders30d:orderCount,revenue30d:Number(revenue.toFixed(2)),conversion:conversion==null?null:Number(conversion.toFixed(2))},
+      competition:{status:competition?.status||null,priceToWin,priceGapPct:priceGapPct==null?null:Number(priceGapPct.toFixed(1))},
+      economics:unitEconomics?{preAdsMarginPct:Number(preAdsMarginPct.toFixed(2)),netProfitBeforeAds:Number(unitEconomics.netProfit||0),targetNetMarginPct:targetNetMargin,availableAdsPct:availableAdsPct==null?null:Number(availableAdsPct.toFixed(2)),maxAdsPerSale:maxAdsPerSale==null?null:Number(maxAdsPerSale.toFixed(2)),breakEvenRoas:breakEvenRoas==null?null:Number(breakEvenRoas.toFixed(2)),minimumRoasToPreserveTarget:preserveMarginRoas==null?null:Number(preserveMarginRoas.toFixed(2))}:null,
+      ads:{enabledForAccount:Boolean(advertiser),activeForItem:Boolean(adGroup?.campaign_id),metrics30d:adMetrics?{clicks:Number(adMetrics.clicks||0),prints:Number(adMetrics.prints||0),cost:Number(adMetrics.cost||0),cpc:Number(adMetrics.cpc||0),ctr:Number(adMetrics.ctr||0),cvr:Number(adMetrics.cvr||0),acos:Number(adMetrics.acos||0),tacos:Number(adMetrics.tacos||0),roas:Number(adMetrics.roas||0),units:Number(adMetrics.units_quantity||0),revenue:Number(adMetrics.total_amount||0)}:null,campaign:campaign?{id:campaign.id,name:campaign.name,status:campaign.status,strategy:campaign.strategy,budget:Number(campaign.budget||0),roasTarget:campaign.roas_target!=null?Number(campaign.roas_target):null,lostByBudget:lostBudget,lostByAdRank:lostRank}:null},
+      decision:{verdict,priority,eligible,signals,actions:[...new Set(actions)].slice(0,6)},
+      suggestion:eligible && availableAdsPct!=null && availableAdsPct>0?{strategy,roasTarget:recommendedRoas==null?null:Number(recommendedRoas.toFixed(2)),dailyBudgetTest:{from:Number(maxAdsPerSale.toFixed(2)),to:Number((maxAdsPerSale*2).toFixed(2)),basis:'Faixa heurística equivalente a 1–2 vendas/dia do custo máximo de Ads que preserva a margem líquida alvo.'},targetNetMarginPct:targetNetMargin}:null
+    });
+  } catch (err) {
+    console.error('[api/items/:id/ads-intelligence]', err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data?.message || err.response?.data?.description || 'Falha ao montar a análise de Publicidade.' });
+  }
+});
+
 router.get('/items/:id/diagnosis', requireAuth, async (req, res) => {
   try {
     const { access_token } = req.session.ml;
