@@ -2,15 +2,25 @@ const axios = require('axios');
 
 const BASE_URL = 'https://api.mercadolibre.com';
 
+function round2(n) {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
- * Busca concorrentes reais na mesma categoria, usando a busca PÚBLICA do
- * Mercado Livre (a mesma que o comprador usa) — não precisa de OAuth nem
- * de nenhuma API paga de terceiro. Devolve os concorrentes e algumas médias
- * úteis para comparação (preço, nº de fotos, % com frete grátis).
+ * Busca uma amostra de anúncios comparáveis na busca do Mercado Livre.
+ * Esta é uma referência de mercado, não o "price_to_win" oficial do catálogo.
  */
 async function searchCompetitors(categoryId, keywords, excludeItemId, limit = 8) {
   const { data } = await axios.get(`${BASE_URL}/sites/MLB/search`, {
-    params: { category: categoryId, q: keywords, limit: limit + 1 }
+    params: { category: categoryId, q: keywords, limit: Math.min(50, limit + 1) },
+    timeout: 12000
   });
 
   const results = (data.results || [])
@@ -19,25 +29,39 @@ async function searchCompetitors(categoryId, keywords, excludeItemId, limit = 8)
     .map((r) => ({
       id: r.id,
       title: r.title,
-      price: r.price,
+      price: Number(r.price || 0),
       sold_quantity: r.sold_quantity || 0,
       free_shipping: r.shipping?.free_shipping ?? false,
-      pictures_count: (r.pictures || []).length
+      condition: r.condition || null,
+      permalink: r.permalink || null,
+      thumbnail: r.thumbnail || null,
+      seller_id: r.seller?.id || null
     }));
 
   if (results.length === 0) {
-    return { competitors: [], avgPrice: null, avgPictures: null, freeShippingRate: null };
+    return {
+      competitors: [],
+      avgPrice: null,
+      avgPictures: null,
+      medianPrice: null,
+      minPrice: null,
+      maxPrice: null,
+      freeShippingRate: null
+    };
   }
 
-  const avgPrice = results.reduce((sum, r) => sum + r.price, 0) / results.length;
-  const avgPictures = results.reduce((sum, r) => sum + r.pictures_count, 0) / results.length;
+  const prices = results.map((r) => r.price).filter((p) => p > 0);
+  const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
   const freeShippingRate = (results.filter((r) => r.free_shipping).length / results.length) * 100;
 
   return {
     competitors: results,
-    avgPrice: Number(avgPrice.toFixed(2)),
-    avgPictures: Number(avgPictures.toFixed(1)),
-    freeShippingRate: Number(freeShippingRate.toFixed(0))
+    avgPrice: round2(avgPrice),
+    avgPictures: null,
+    medianPrice: round2(median(prices)),
+    minPrice: round2(Math.min(...prices)),
+    maxPrice: round2(Math.max(...prices)),
+    freeShippingRate: Math.round(freeShippingRate)
   };
 }
 

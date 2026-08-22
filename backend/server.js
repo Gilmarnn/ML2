@@ -109,7 +109,7 @@ app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['htm
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', app: 'visium-seller', version: '2.0.3' });
+    res.json({ status: 'ok', app: 'visium-seller', version: '2.1.0' });
   } catch (_) {
     res.status(503).json({ status: 'degraded', database: 'unavailable' });
   }

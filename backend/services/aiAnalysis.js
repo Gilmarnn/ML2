@@ -21,7 +21,7 @@ async function deepAnalysis({ item, competitorData }) {
   if (process.env.AI_MOCK_MODE === 'true') {
     const compLine =
       competitorData.competitors.length > 0
-        ? `Encontrei ${competitorData.competitors.length} concorrentes reais nessa categoria (preço médio R$ ${competitorData.avgPrice}, ${competitorData.avgPictures} fotos em média, ${competitorData.freeShippingRate}% com frete grátis).`
+        ? `Encontrei ${competitorData.competitors.length} concorrentes reais nessa categoria (preço médio R$ ${competitorData.avgPrice}, ${competitorData.avgPictures ?? 'n/d'} fotos em média, ${competitorData.freeShippingRate}% com frete grátis).`
         : 'Não encontrei concorrentes comparáveis nessa categoria/busca.';
 
     return {
@@ -67,7 +67,7 @@ RISCO DE MUDANÇA: ${item.sold_quantity > 0 ? `Este anúncio já teve ${item.sol
     competitorData.competitors.length > 0
       ? `Concorrentes reais na mesma categoria (${competitorData.competitors.length} analisados):
 - Preço médio da concorrência: R$ ${competitorData.avgPrice}
-- Média de fotos por anúncio concorrente: ${competitorData.avgPictures}
+- Média de fotos por anúncio concorrente: ${competitorData.avgPictures ?? 'n/d'}
 - % dos concorrentes com frete grátis: ${competitorData.freeShippingRate}%
 - Alguns títulos concorrentes: ${competitorData.competitors.slice(0, 5).map((c) => c.title).join(' | ')}`
       : 'Não foi possível encontrar concorrentes comparáveis para essa categoria/termo de busca.';

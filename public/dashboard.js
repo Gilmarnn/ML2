@@ -491,8 +491,9 @@ async function loadItems(isFirstPage = true) {
               <input type="number" step="0.01" min="0" id="cost-${item.id}" class="item-cost-input" data-item-id="${item.id}" value="${savedCost !== null ? savedCost : ''}" placeholder="0,00" />
             </div>
             <div class="item-card-profit-wrap">${renderProfit(item.price, savedCost, globalSettings.commission, globalSettings.tax)}</div>
-            <div class="item-card-footer">
-              <button class="link-btn" data-id="${item.id}">Ver diagnóstico</button>
+            <div class="item-card-footer item-card-footer-actions">
+              <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
+              <button class="link-btn" data-id="${item.id}">Diagnóstico</button>
             </div>
           </div>
         </article>`;
@@ -504,6 +505,14 @@ async function loadItems(isFirstPage = true) {
     grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
+    });
+
+    grid.querySelectorAll('.radar-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openCompetitionRadar(btn.dataset.radarId);
+      });
     });
 
     grid.querySelectorAll('.ai-btn:not([data-bound])').forEach((btn) => {
@@ -572,6 +581,146 @@ function openDiagnosis(itemId, items) {
     ${aiHtml}
   `;
   modal.hidden = false;
+}
+
+function radarStatusLabel(status) {
+  return ({
+    winning: 'Ganhando',
+    sharing_first_place: 'Compartilhando 1º lugar',
+    competing: 'Perdendo / competindo',
+    listed: 'Listado, mas fora da competição'
+  })[status] || 'Sem status oficial';
+}
+
+function radarStatusClass(status) {
+  if (status === 'winning' || status === 'sharing_first_place') return 'radar-good';
+  if (status === 'competing') return 'radar-bad';
+  return 'radar-neutral';
+}
+
+function renderRadarMargin(label, result) {
+  if (!result) return '';
+  const cls = result.netProfit >= 0 ? 'radar-good-text' : 'radar-bad-text';
+  return `
+    <div class="radar-margin-row">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${cls}">${formatMoney(result.netProfit)} · ${Number(result.marginPercent).toFixed(1)}%</strong>
+    </div>`;
+}
+
+async function openCompetitionRadar(itemId) {
+  const modal = document.getElementById('diagnosis-modal');
+  const body = document.getElementById('modal-body');
+  const productCost = getItemCost(itemId);
+
+  body.innerHTML = `
+    <h2>Radar de Concorrência</h2>
+    <p style="color:var(--text-dim);font-size:14px">Consultando competição de catálogo e preços de mercado…</p>`;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/competition-radar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productCost: productCost === null ? '' : productCost,
+        mlCommissionPercent: globalSettings.commission,
+        taxPercent: globalSettings.tax,
+        shippingCost: 0,
+        fixedFee: 0,
+        adsCostPercent: 0
+      })
+    });
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao consultar o radar.')}</p>`;
+      return;
+    }
+
+    const official = data.officialCompetition;
+    const market = data.market || {};
+    const competitors = market.competitors || [];
+    const hasOfficialPrice = official.available && official.priceToWin != null;
+    const diff = hasOfficialPrice ? Number(official.priceDifference || 0) : null;
+
+    let officialHtml = '';
+    if (official.available) {
+      officialHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Competição oficial do catálogo</div>
+          <div class="radar-status ${radarStatusClass(official.status)}">${escapeHtml(radarStatusLabel(official.status))}</div>
+          <div class="radar-metrics">
+            <div><span>Seu preço</span><strong>${formatMoney(data.item.price)}</strong></div>
+            <div><span>Preço para ganhar</span><strong>${hasOfficialPrice ? formatMoney(official.priceToWin) : 'Não informado'}</strong></div>
+            <div><span>Diferença</span><strong>${hasOfficialPrice ? `${diff > 0 ? '-' : diff < 0 ? '+' : ''}${formatMoney(Math.abs(diff))}` : '—'}</strong></div>
+          </div>
+          ${official.boosts?.length ? `<div class="radar-boosts">${official.boosts.map((b) => `
+            <div class="radar-boost ${b.status === 'boosted' ? 'is-on' : b.status === 'opportunity' ? 'is-opportunity' : ''}">
+              <span>${escapeHtml(b.description || b.id)}</span><strong>${b.status === 'boosted' ? 'Ativo' : b.status === 'opportunity' ? 'Oportunidade' : 'Sem ganho adicional'}</strong>
+            </div>`).join('')}</div>` : ''}
+        </section>`;
+    } else {
+      officialHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Competição oficial do catálogo</div>
+          <div class="check-row check-info">Este anúncio não retornou <strong>price_to_win</strong>. O Radar abaixo usa preços observados em anúncios similares e não chama isso de “preço para ganhar”.</div>
+        </section>`;
+    }
+
+    const marketHtml = competitors.length ? `
+      <section class="radar-section">
+        <div class="radar-section-title">Referência de mercado</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Média</span><strong>${formatMoney(market.avgPrice)}</strong></div>
+          <div><span>Mediana</span><strong>${formatMoney(market.medianPrice)}</strong></div>
+          <div><span>Menor</span><strong>${formatMoney(market.minPrice)}</strong></div>
+          <div><span>Frete grátis</span><strong>${Number(market.freeShippingRate || 0)}%</strong></div>
+        </div>
+        <p class="radar-note">Na amostra de ${competitors.length} anúncios, ${market.cheaperCount || 0} estão abaixo do seu preço. A busca é uma referência de mercado; produtos podem ter variações de marca, kit, condição e características.</p>
+        <div class="radar-competitors">
+          ${competitors.slice(0, 6).map((c) => `
+            <div class="radar-competitor">
+              <div><strong>${escapeHtml(c.title)}</strong><span>${c.free_shipping ? 'Frete grátis' : 'Frete não identificado'} · ${Number(c.sold_quantity || 0).toLocaleString('pt-BR')} vendidos*</span></div>
+              <strong>${formatMoney(c.price)}</strong>
+            </div>`).join('')}
+        </div>
+        <p class="radar-footnote">*Quantidade exibida pela busca pública pode ser referencial.</p>
+      </section>` : `
+      <section class="radar-section"><div class="radar-section-title">Referência de mercado</div><div class="check-row check-alerta">Não encontrei uma amostra comparável suficiente para este anúncio.</div></section>`;
+
+    let marginHtml = '';
+    if (productCost === null) {
+      marginHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Proteção de margem</div>
+          <div class="check-row check-alerta">Informe o custo do produto no card do anúncio para o Radar calcular se o preço sugerido mantém lucro e margem.</div>
+        </section>`;
+    } else {
+      marginHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Proteção de margem</div>
+          ${renderRadarMargin('No preço atual', data.margin?.current)}
+          ${renderRadarMargin('No preço para ganhar', data.margin?.atPriceToWin)}
+          ${data.margin?.atPriceToWin && data.margin.atPriceToWin.netProfit < 0 ? '<div class="radar-warning">Não reduza para o preço sugerido sem rever custos: a simulação ficaria no prejuízo.</div>' : ''}
+          <p class="radar-note">Simulação usa custo informado no card, comissão de ${Number(globalSettings.commission).toFixed(1)}% e imposto de ${Number(globalSettings.tax).toFixed(1)}%. Frete, tarifa fixa e Ads estão em zero nesta simulação rápida.</p>
+        </section>`;
+    }
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.item.title)}</h2>
+      <p class="radar-subtitle">Radar de Concorrência · ${escapeHtml(data.item.id)}</p>
+      ${officialHtml}
+      ${marketHtml}
+      ${marginHtml}
+    `;
+  } catch (err) {
+    body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">Erro ao consultar o Radar. Veja o console para detalhes.</p>`;
+    console.error(err);
+  }
 }
 
 async function openAIAnalysis(itemId) {

@@ -177,6 +177,27 @@ async function answerQuestion(questionId, text, accessToken) {
  * diferente de "sold_quantity" do item (que é total histórico do anúncio,
  * não fatiado por data). Pagina automaticamente até um limite de segurança.
  */
+
+/**
+ * Competição em catálogo / preço para ganhar.
+ * Só existe para anúncios elegíveis/participantes da competição de catálogo.
+ * Quando o item não participa, a API pode responder 404/400; o chamador deve
+ * tratar isso como "sem dado oficial" e usar comparação de mercado como fallback.
+ */
+async function getPriceToWin(itemId, accessToken) {
+  const api = client(accessToken);
+  try {
+    const { data } = await api.get(`/items/${itemId}/price_to_win`, {
+      params: { version: 'v2' }
+    });
+    return data;
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 400 || status === 403 || status === 404) return null;
+    throw err;
+  }
+}
+
 async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 300 } = {}) {
   const api = client(accessToken);
   const orders = [];
@@ -216,5 +237,6 @@ module.exports = {
   getUserInfo,
   getUnansweredQuestions,
   answerQuestion,
-  getOrders
+  getOrders,
+  getPriceToWin
 };

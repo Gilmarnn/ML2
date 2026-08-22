@@ -156,3 +156,35 @@ Depois do deploy, valide nesta ordem:
 ## Importante sobre TikTok Shop e Shopee
 
 O código de integração está implementado, mas nenhuma aplicação consegue acessar dados reais dessas plataformas sem credenciais, scopes e autorizações aprovadas pelos respectivos portais de desenvolvedor. Portanto, a entrega é funcional sem “credenciais fictícias”: Mercado Livre continua operacional, e TikTok/Shopee passam a funcionar quando as credenciais reais forem adicionadas ao ambiente.
+
+## TikTok Shop — segundo canal (v2.0.3)
+
+A integração TikTok Shop usa o fluxo oficial de autorização de Seller. Configure no Railway:
+
+- `TIKTOK_APP_KEY`
+- `TIKTOK_APP_SECRET`
+- `TIKTOK_SERVICE_ID`
+- `TIKTOK_REDIRECT_URI=https://SEU-DOMINIO/integrations/callback/tiktok` (use a mesma URL cadastrada no Partner Center)
+- `TIKTOK_AUTHORIZE_URL=https://services.tiktokshop.com/open/authorize`
+- `TIKTOK_API_BASE_URL=https://open-api.tiktokglobalshop.com`
+- `TIKTOK_API_VERSION=202309`
+
+Escopos mínimos recomendados para o que o Visium sincroniza nesta etapa:
+
+- autorização / lojas autorizadas
+- produtos (`seller.product.basic`)
+- pedidos (`seller.order.info`)
+
+Depois de cadastrar a Redirect URL e as credenciais no Partner Center/Railway, o botão `+ TikTok Shop` no dashboard inicia a autorização. Ao voltar do TikTok, a conta é salva em `marketplace_accounts` e o botão `Sincronizar conta ativa` importa produtos e pedidos para a visão multicanal.
+
+
+## Visium Seller 2.1.0 — Radar de Concorrência
+
+- Botão **Radar** em cada anúncio do Mercado Livre.
+- Consulta oficial de competição de catálogo em `/items/{ITEM_ID}/price_to_win?version=v2`.
+- Exibe status `winning`, `sharing_first_place`, `competing` ou `listed` quando disponível.
+- Exibe `price_to_win` sem alterar automaticamente o preço do anúncio.
+- Mostra boosts/oportunidades de competição (Full, frete grátis, parcelamento e outros retornados pelo ML).
+- Para anúncios sem dado oficial de competição, usa uma amostra da busca do Mercado Livre como referência de mercado, deixando claro que não é um preço oficial para ganhar.
+- Calcula a margem no preço atual e no `price_to_win` quando o custo do produto estiver informado no card.
+- Nenhuma mudança de preço é aplicada automaticamente pelo Radar.

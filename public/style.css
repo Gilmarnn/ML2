@@ -768,3 +768,40 @@ h1, h2, h3 {
 }
 .password-toggle-btn:hover { opacity: 1; }
 .password-toggle-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+
+/* ---------- Radar de Concorrência ---------- */
+.item-card-footer-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.item-card-footer-actions .link-btn { width:100%; padding-left:7px; padding-right:7px; }
+.radar-btn { border-color:rgba(198,255,0,.45); color:var(--primary); }
+.radar-section { margin-top:20px; padding-top:16px; border-top:1px solid var(--border); }
+.radar-section-title { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-style:italic; text-transform:uppercase; font-size:17px; margin-bottom:10px; }
+.radar-subtitle { color:var(--text-dim); font-size:12px; }
+.radar-status { display:inline-flex; padding:6px 10px; border-radius:3px; font-size:13px; font-weight:800; margin-bottom:12px; }
+.radar-good { background:rgba(198,255,0,.12); color:var(--primary); }
+.radar-bad { background:rgba(255,77,77,.12); color:var(--danger); }
+.radar-neutral { background:var(--surface-alt); color:var(--text-dim); }
+.radar-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.radar-metrics-4 { grid-template-columns:repeat(4,1fr); }
+.radar-metrics > div { background:var(--bg); border:1px solid var(--border); border-radius:3px; padding:10px; }
+.radar-metrics span { display:block; color:var(--text-dim); text-transform:uppercase; font-size:10px; letter-spacing:.04em; margin-bottom:4px; }
+.radar-metrics strong { font-size:16px; }
+.radar-boosts { display:grid; gap:6px; margin-top:10px; }
+.radar-boost { display:flex; justify-content:space-between; gap:12px; padding:8px 10px; background:var(--bg); border-left:3px solid var(--border); font-size:12px; }
+.radar-boost strong { white-space:nowrap; color:var(--text-dim); }
+.radar-boost.is-on { border-left-color:var(--primary); }
+.radar-boost.is-on strong { color:var(--primary); }
+.radar-boost.is-opportunity { border-left-color:var(--warn); }
+.radar-boost.is-opportunity strong { color:var(--warn); }
+.radar-note,.radar-footnote { color:var(--text-dim); font-size:12px; line-height:1.5; margin-top:9px; }
+.radar-footnote { font-size:10px; }
+.radar-competitors { display:grid; gap:6px; margin-top:10px; }
+.radar-competitor { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:9px 10px; border:1px solid var(--border); border-radius:3px; }
+.radar-competitor > div { min-width:0; }
+.radar-competitor > div strong { display:block; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.radar-competitor span { display:block; margin-top:3px; color:var(--text-dim); font-size:10px; }
+.radar-competitor > strong { white-space:nowrap; color:var(--primary); }
+.radar-margin-row { display:flex; justify-content:space-between; gap:14px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.radar-good-text { color:var(--primary); }
+.radar-bad-text { color:var(--danger); }
+.radar-warning { margin-top:10px; padding:10px; border-left:3px solid var(--danger); background:rgba(255,77,77,.08); color:var(--danger); font-size:12px; }
+@media(max-width:640px){.radar-metrics,.radar-metrics-4{grid-template-columns:repeat(2,1fr)}.radar-competitor{flex-direction:column}.item-card-footer-actions{grid-template-columns:1fr}}

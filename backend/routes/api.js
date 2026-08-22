@@ -310,6 +310,107 @@ router.get('/financials', requireAuth, async (req, res) => {
   }
 });
 
+// Radar de concorrência: combina o dado oficial de competição em catálogo
+// (price_to_win/status/boosts) com uma amostra de anúncios similares da busca.
+// Recebe custos do frontend apenas para simular margem; não altera preço no ML.
+router.post('/items/:id/competition-radar', requireAuth, async (req, res) => {
+  try {
+    const { access_token } = req.session.ml;
+    const [item] = await mlClient.getItemsDetails([req.params.id], access_token);
+
+    if (!item) return res.status(404).json({ error: 'Anúncio não encontrado.' });
+
+    const [officialCompetition, market] = await Promise.all([
+      mlClient.getPriceToWin(item.id, access_token).catch(() => null),
+      searchCompetitors(item.category_id, item.title, item.id, 8).catch(() => ({
+        competitors: [], avgPrice: null, medianPrice: null, minPrice: null,
+        maxPrice: null, freeShippingRate: null
+      }))
+    ]);
+
+    const currentPrice = Number(item.price || officialCompetition?.current_price || 0);
+    const officialPriceToWin = officialCompetition?.price_to_win != null
+      ? Number(officialCompetition.price_to_win)
+      : null;
+
+    const marketPrices = market.competitors.map((c) => Number(c.price || 0)).filter((p) => p > 0);
+    const cheaperCount = marketPrices.filter((p) => p < currentPrice).length;
+    const sameOrHigherCount = marketPrices.filter((p) => p >= currentPrice).length;
+    const marketPosition = marketPrices.length
+      ? Math.round((marketPrices.filter((p) => p <= currentPrice).length / marketPrices.length) * 100)
+      : null;
+
+    const input = req.body || {};
+    const hasCost = input.productCost !== undefined && input.productCost !== null && input.productCost !== '';
+    let currentMargin = null;
+    let winMargin = null;
+
+    if (hasCost) {
+      const common = {
+        productCost: input.productCost,
+        mlCommissionPercent: input.mlCommissionPercent || 0,
+        shippingCost: input.shippingCost || 0,
+        fixedFee: input.fixedFee || 0,
+        taxPercent: input.taxPercent || 0,
+        adsCostPercent: input.adsCostPercent || 0
+      };
+      currentMargin = calculateMargin({ ...common, price: currentPrice });
+      if (officialPriceToWin && officialPriceToWin > 0) {
+        winMargin = calculateMargin({ ...common, price: officialPriceToWin });
+      }
+    }
+
+    const boosts = (officialCompetition?.boosts || []).map((b) => ({
+      id: b.id,
+      status: b.status,
+      description: b.description
+    }));
+
+    res.json({
+      item: {
+        id: item.id,
+        title: item.title,
+        price: currentPrice,
+        currency_id: item.currency_id || 'BRL',
+        category_id: item.category_id,
+        catalog_listing: Boolean(item.catalog_listing),
+        catalog_product_id: item.catalog_product_id || null,
+        free_shipping: Boolean(item.shipping?.free_shipping),
+        listing_type_id: item.listing_type_id
+      },
+      officialCompetition: officialCompetition ? {
+        available: true,
+        status: officialCompetition.status || null,
+        currentPrice: Number(officialCompetition.current_price || currentPrice),
+        priceToWin: officialPriceToWin,
+        priceDifference: officialPriceToWin != null ? Number((currentPrice - officialPriceToWin).toFixed(2)) : null,
+        boosts
+      } : {
+        available: false,
+        status: null,
+        currentPrice,
+        priceToWin: null,
+        priceDifference: null,
+        boosts: []
+      },
+      market: {
+        ...market,
+        cheaperCount,
+        sameOrHigherCount,
+        pricePercentile: marketPosition
+      },
+      margin: {
+        current: currentMargin,
+        atPriceToWin: winMargin
+      },
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[api/items/:id/competition-radar]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao montar o Radar de Concorrência.' });
+  }
+});
+
 router.get('/items/:id/diagnosis', requireAuth, async (req, res) => {
   try {
     const { access_token } = req.session.ml;
