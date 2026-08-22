@@ -765,10 +765,17 @@ function trendArrow(value) {
 }
 
 async function openConversionEngine(itemId) {
-  const modal = document.getElementById('modal');
-  const body = document.getElementById('modal-body');
+  const modal = document.getElementById('diagnosis-modal') || document.querySelector('.diagnosis-modal');
+  const body = document.getElementById('modal-body') || modal?.querySelector('.modal-body');
+
+  if (!modal || !body) {
+    console.error('[Motor de Conversão] Estrutura do modal não encontrada.', { modal, body });
+    alert('Não foi possível abrir o Motor de Conversão. Atualize a página e tente novamente.');
+    return;
+  }
+
+  body.innerHTML = '<h2>Motor de Conversão</h2><p>Calculando conversão, vendas e tendência dos últimos 60 dias…</p>';
   modal.hidden = false;
-  body.innerHTML = '<p>Calculando conversão, vendas e tendência dos últimos 60 dias…</p>';
 
   try {
     const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/conversion-engine`);
