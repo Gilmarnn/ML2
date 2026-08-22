@@ -1,25 +1,244 @@
+// ---------- Visium Seller: contexto multicanal ----------
+let activeMarketplaceAccountId = localStorage.getItem('visium:marketplaceAccountId') || '';
+let activeMarketplacePlatform = '';
+let marketplaceAccounts = [];
+
+function withAccount(url) {
+  if (!url.startsWith('/api/') || url.startsWith('/api/unified/') || !activeMarketplaceAccountId) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}accountId=${encodeURIComponent(activeMarketplaceAccountId)}`;
+}
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  if (typeof input === 'string') input = withAccount(input);
+  return nativeFetch(input, init);
+};
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function platformLabel(platform) {
+  return ({ mercadolivre: 'Mercado Livre', tiktok: 'TikTok Shop', shopee: 'Shopee' })[platform] || platform;
+}
+
+function currentAccount() {
+  return marketplaceAccounts.find((a) => String(a.id) === String(activeMarketplaceAccountId)) || null;
+}
+
+async function loadPlatformActions() {
+  const wrap = document.getElementById('marketplace-actions');
+  try {
+    const res = await nativeFetch('/integrations/platforms');
+    const data = await res.json();
+    wrap.innerHTML = (data.platforms || []).map((p) => {
+      const cls = `marketplace-connect ${p.id === 'mercadolivre' ? 'ml' : p.id}`;
+      if (!p.configured) return `<span class="${cls} disabled" title="Configure as credenciais no Railway">${escapeHtml(p.name)} · configurar</span>`;
+      return `<a class="${cls}" href="/integrations/connect/${encodeURIComponent(p.id)}">+ ${escapeHtml(p.name)}</a>`;
+    }).join('');
+  } catch (err) {
+    wrap.innerHTML = '<span class="marketplace-status">Não foi possível carregar os canais.</span>';
+  }
+}
+
+async function loadMarketplaceAccounts() {
+  const select = document.getElementById('marketplace-account-select');
+  const status = document.getElementById('marketplace-connection-status');
+  try {
+    const res = await nativeFetch('/integrations/accounts');
+    const data = await res.json();
+    marketplaceAccounts = data.accounts || [];
+    if (!marketplaceAccounts.length) {
+      activeMarketplaceAccountId = '';
+      activeMarketplacePlatform = '';
+      localStorage.removeItem('visium:marketplaceAccountId');
+      select.innerHTML = '<option value="">Nenhuma conta conectada</option>';
+      status.textContent = 'Conecte seu primeiro canal de vendas.';
+      return;
+    }
+    select.innerHTML = '<option value="">Todos os canais</option>' + marketplaceAccounts.map((a) => `<option value="${a.id}">${escapeHtml(platformLabel(a.platform))} · ${escapeHtml(a.account_name || a.seller_id)}</option>`).join('');
+    const urlAccount = new URLSearchParams(location.search).get('account');
+    if (urlAccount && marketplaceAccounts.some((a) => String(a.id) === String(urlAccount))) activeMarketplaceAccountId = String(urlAccount);
+    if (activeMarketplaceAccountId && !marketplaceAccounts.some((a) => String(a.id) === String(activeMarketplaceAccountId))) activeMarketplaceAccountId = '';
+    // Se só existe uma conta conectada, ela deve ser a conta ativa por padrão.
+    // Antes o dashboard permanecia em "Todos os canais", o que fazia as abas do ML
+    // parecerem quebradas porque não havia plataforma ativa.
+    if (!activeMarketplaceAccountId && marketplaceAccounts.length === 1) {
+      activeMarketplaceAccountId = String(marketplaceAccounts[0].id);
+    }
+    select.value = activeMarketplaceAccountId;
+    if (activeMarketplaceAccountId) localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    else localStorage.removeItem('visium:marketplaceAccountId');
+    const current = currentAccount();
+    activeMarketplacePlatform = current?.platform || '';
+    status.textContent = current ? `${platformLabel(current.platform)} conectado · ${current.account_name || current.seller_id}` : 'Visão consolidada de todos os canais.';
+  } catch (err) {
+    select.innerHTML = '<option value="">Erro ao carregar contas</option>';
+    status.textContent = 'Não foi possível consultar as conexões.';
+    console.error(err);
+  }
+}
+
+async function loadOverview() {
+  const status = document.getElementById('overview-status');
+  const content = document.getElementById('overview-content');
+  status.hidden = false;
+  status.textContent = 'Carregando visão geral…';
+  content.hidden = true;
+  try {
+    const query = activeMarketplaceAccountId ? `?accountId=${encodeURIComponent(activeMarketplaceAccountId)}` : '';
+    const [overviewRes, productsRes] = await Promise.all([
+      nativeFetch(`/api/unified/overview${query}`),
+      nativeFetch(`/api/unified/products${query}${query ? '&' : '?'}limit=20`)
+    ]);
+    const overview = await overviewRes.json();
+    const productData = await productsRes.json();
+    if (!overviewRes.ok) throw new Error(overview.error || 'Falha ao carregar visão geral.');
+    document.getElementById('overview-revenue').textContent = formatMoney(overview.last30Days?.revenue || 0);
+    document.getElementById('overview-orders').textContent = Number(overview.last30Days?.orderCount || 0).toLocaleString('pt-BR');
+    document.getElementById('overview-ticket').textContent = formatMoney(overview.last30Days?.averageTicket || 0);
+    document.getElementById('overview-accounts').textContent = overview.accounts?.length || 0;
+    const products = productData.products || [];
+    document.getElementById('unified-products').innerHTML = products.length ? products.map((p) => `
+      <div class="unified-product">
+        ${p.thumbnail ? `<img src="${escapeHtml(fixThumb(p.thumbnail))}" alt="">` : '<div></div>'}
+        <div>
+          <strong>${escapeHtml(p.title)}</strong>
+          <div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')} · preço ${formatMoney(p.price || 0)}</div>
+          <div class="meta"><strong>${Number(p.units_30d || 0).toLocaleString('pt-BR')} un.</strong> nos últimos 30 dias · <strong>${formatMoney(p.revenue_30d || 0)}</strong> faturados</div>
+        </div>
+        <span class="platform-pill">${escapeHtml(platformLabel(p.platform))}</span>
+        <strong>${formatMoney(p.revenue_30d || 0)}</strong>
+      </div>`).join('') : '<div class="status">Nenhum produto sincronizado ainda. Use “Sincronizar conta ativa”.</div>';
+    status.hidden = true;
+    content.hidden = false;
+  } catch (err) {
+    status.textContent = err.message || 'Falha ao carregar visão geral.';
+    console.error(err);
+  }
+}
+
+async function syncActiveAccount() {
+  const btn = document.getElementById('sync-account-btn');
+  const status = document.getElementById('marketplace-connection-status');
+  if (!activeMarketplaceAccountId) {
+    const onlyAccount = marketplaceAccounts.length === 1 ? marketplaceAccounts[0] : null;
+    if (onlyAccount) {
+      activeMarketplaceAccountId = String(onlyAccount.id);
+      activeMarketplacePlatform = onlyAccount.platform;
+      document.getElementById('marketplace-account-select').value = activeMarketplaceAccountId;
+      localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+    } else {
+      status.textContent = 'Selecione uma conta antes de sincronizar.';
+      return;
+    }
+  }
+  btn.classList.add('marketplace-syncing');
+  btn.textContent = 'Sincronizando…';
+  try {
+    const res = await nativeFetch(`/integrations/accounts/${encodeURIComponent(activeMarketplaceAccountId)}/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 30 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha na sincronização.');
+    status.textContent = `Sincronização concluída · ${data.products?.count || 0} produtos · ${data.orders?.count || 0} pedidos`;
+    await loadOverview();
+    if (activeMarketplacePlatform === 'mercadolivre') { loadCategories(); loadItems(true); }
+  } catch (err) {
+    status.textContent = err.message;
+  } finally {
+    btn.classList.remove('marketplace-syncing');
+    btn.textContent = 'Sincronizar conta ativa';
+  }
+}
+
+document.getElementById('marketplace-account-select').addEventListener('change', async (e) => {
+  activeMarketplaceAccountId = e.target.value;
+  localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+  const current = currentAccount();
+  activeMarketplacePlatform = current?.platform || '';
+  document.getElementById('marketplace-connection-status').textContent = current ? `${platformLabel(current.platform)} conectado · ${current.account_name || current.seller_id}` : 'Visão consolidada de todos os canais.';
+  loadedItems = []; currentOffset = 0; questionsLoadedOnce = false;
+  await loadOverview();
+  if (activeMarketplacePlatform === 'mercadolivre') {
+    loadCategories(); loadItems(true);
+  } else {
+    switchTab('overview');
+  }
+});
+
+document.getElementById('sync-account-btn').addEventListener('click', syncActiveAccount);
+
+const tabOverview = document.getElementById('tab-overview');
 const tabItems = document.getElementById('tab-items');
+const tabQuestions = document.getElementById('tab-questions');
+const tabFinancials = document.getElementById('tab-financials');
 const tabExplore = document.getElementById('tab-explore');
 const tabCalc = document.getElementById('tab-calc');
+const panelOverview = document.getElementById('panel-overview');
 const panelItems = document.getElementById('panel-items');
+const panelQuestions = document.getElementById('panel-questions');
+const panelFinancials = document.getElementById('panel-financials');
 const panelExplore = document.getElementById('panel-explore');
 const panelCalc = document.getElementById('panel-calc');
 
-tabItems.addEventListener('click', () => switchTab('items'));
-tabExplore.addEventListener('click', () => switchTab('explore'));
+async function ensureMercadoLivreAccount() {
+  if (activeMarketplacePlatform === 'mercadolivre' && activeMarketplaceAccountId) return true;
+  const mlAccount = marketplaceAccounts.find((a) => a.platform === 'mercadolivre' && a.status !== 'disconnected');
+  if (!mlAccount) {
+    document.getElementById('marketplace-connection-status').textContent = 'Conecte uma conta do Mercado Livre para usar esta área.';
+    return false;
+  }
+  activeMarketplaceAccountId = String(mlAccount.id);
+  activeMarketplacePlatform = 'mercadolivre';
+  localStorage.setItem('visium:marketplaceAccountId', activeMarketplaceAccountId);
+  const accountSelect = document.getElementById('marketplace-account-select');
+  accountSelect.value = activeMarketplaceAccountId;
+  document.getElementById('marketplace-connection-status').textContent = `Mercado Livre conectado · ${mlAccount.account_name || mlAccount.seller_id}`;
+  return true;
+}
+
+async function openMlTab(tab) {
+  if (!await ensureMercadoLivreAccount()) return;
+  switchTab(tab);
+}
+
+tabOverview.addEventListener('click', () => switchTab('overview'));
+tabItems.addEventListener('click', () => openMlTab('items'));
+tabQuestions.addEventListener('click', () => openMlTab('questions'));
+tabFinancials.addEventListener('click', () => openMlTab('financials'));
+tabExplore.addEventListener('click', () => openMlTab('explore'));
 tabCalc.addEventListener('click', () => switchTab('calc'));
 
+let questionsLoadedOnce = false;
+
 function switchTab(tab) {
+  if (activeMarketplacePlatform !== 'mercadolivre' && ['items','questions','financials','explore'].includes(tab)) tab = 'overview';
+  panelOverview.hidden = tab !== 'overview';
   panelItems.hidden = tab !== 'items';
+  panelQuestions.hidden = tab !== 'questions';
+  panelFinancials.hidden = tab !== 'financials';
   panelExplore.hidden = tab !== 'explore';
   panelCalc.hidden = tab !== 'calc';
+  tabOverview.classList.toggle('active', tab === 'overview');
   tabItems.classList.toggle('active', tab === 'items');
+  tabQuestions.classList.toggle('active', tab === 'questions');
+  tabFinancials.classList.toggle('active', tab === 'financials');
   tabExplore.classList.toggle('active', tab === 'explore');
   tabCalc.classList.toggle('active', tab === 'calc');
 
+  if (tab === 'overview') loadOverview();
   if (tab === 'explore' && !exploreLoadedOnce) {
     exploreLoadedOnce = true;
     loadExploreCategories(null);
+  }
+  if (tab === 'questions' && !questionsLoadedOnce) {
+    questionsLoadedOnce = true;
+    loadQuestions();
+  }
+  if (tab === 'financials') {
+    loadFinancials();
   }
 }
 
@@ -182,6 +401,15 @@ async function loadCategories() {
   }
 }
 
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  try {
+    await fetch('/user/logout', { method: 'POST' });
+  } catch (err) {
+    // segue para o redirect mesmo se a chamada falhar
+  }
+  window.location.href = '/login.html';
+});
+
 document.getElementById('filter-stock').addEventListener('change', (e) => {
   activeFilters.stock = e.target.value;
   loadItems(true);
@@ -267,8 +495,11 @@ async function loadItems(isFirstPage = true) {
               <input type="number" step="0.01" min="0" id="cost-${item.id}" class="item-cost-input" data-item-id="${item.id}" value="${savedCost !== null ? savedCost : ''}" placeholder="0,00" />
             </div>
             <div class="item-card-profit-wrap">${renderProfit(item.price, savedCost, globalSettings.commission, globalSettings.tax)}</div>
-            <div class="item-card-footer">
-              <button class="link-btn" data-id="${item.id}">Ver diagnóstico</button>
+            <div class="item-card-footer item-card-footer-actions">
+              <button class="link-btn conversion-btn" data-conversion-id="${item.id}">Conversão</button>
+              <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
+              <button class="link-btn reviews-btn" data-reviews-id="${item.id}">Avaliações</button>
+              <button class="link-btn" data-id="${item.id}">Diagnóstico</button>
             </div>
           </div>
         </article>`;
@@ -280,6 +511,30 @@ async function loadItems(isFirstPage = true) {
     grid.querySelectorAll('button[data-id]:not([data-bound])').forEach((btn) => {
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', () => openDiagnosis(btn.dataset.id, loadedItems));
+    });
+
+    grid.querySelectorAll('.conversion-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openConversionEngine(btn.dataset.conversionId);
+      });
+    });
+
+    grid.querySelectorAll('.radar-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openCompetitionRadar(btn.dataset.radarId);
+      });
+    });
+
+    grid.querySelectorAll('.reviews-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReviews(btn.dataset.reviewsId);
+      });
     });
 
     grid.querySelectorAll('.ai-btn:not([data-bound])').forEach((btn) => {
@@ -348,6 +603,289 @@ function openDiagnosis(itemId, items) {
     ${aiHtml}
   `;
   modal.hidden = false;
+}
+
+function radarStatusLabel(status) {
+  return ({
+    winning: 'Ganhando',
+    sharing_first_place: 'Compartilhando 1º lugar',
+    competing: 'Perdendo / competindo',
+    listed: 'Listado, mas fora da competição'
+  })[status] || 'Sem status oficial';
+}
+
+function radarStatusClass(status) {
+  if (status === 'winning' || status === 'sharing_first_place') return 'radar-good';
+  if (status === 'competing') return 'radar-bad';
+  return 'radar-neutral';
+}
+
+function renderRadarMargin(label, result) {
+  if (!result) return '';
+  const cls = result.netProfit >= 0 ? 'radar-good-text' : 'radar-bad-text';
+  return `
+    <div class="radar-margin-row">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${cls}">${formatMoney(result.netProfit)} · ${Number(result.marginPercent).toFixed(1)}%</strong>
+    </div>`;
+}
+
+async function openCompetitionRadar(itemId) {
+  const modal = document.getElementById('diagnosis-modal');
+  const body = document.getElementById('modal-body');
+  const productCost = getItemCost(itemId);
+
+  body.innerHTML = `
+    <h2>Radar de Concorrência</h2>
+    <p style="color:var(--text-dim);font-size:14px">Consultando competição de catálogo e preços de mercado…</p>`;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/competition-radar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productCost: productCost === null ? '' : productCost,
+        mlCommissionPercent: globalSettings.commission,
+        taxPercent: globalSettings.tax,
+        shippingCost: 0,
+        fixedFee: 0,
+        adsCostPercent: 0
+      })
+    });
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao consultar o radar.')}</p>`;
+      return;
+    }
+
+    const official = data.officialCompetition;
+    const market = data.market || {};
+    const competitors = market.competitors || [];
+    const hasOfficialPrice = official.available && official.priceToWin != null;
+    const diff = hasOfficialPrice ? Number(official.priceDifference || 0) : null;
+
+    let officialHtml = '';
+    if (official.available) {
+      officialHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Competição oficial do catálogo</div>
+          <div class="radar-status ${radarStatusClass(official.status)}">${escapeHtml(radarStatusLabel(official.status))}</div>
+          <div class="radar-metrics">
+            <div><span>Seu preço</span><strong>${formatMoney(data.item.price)}</strong></div>
+            <div><span>Preço para ganhar</span><strong>${hasOfficialPrice ? formatMoney(official.priceToWin) : 'Não informado'}</strong></div>
+            <div><span>Diferença</span><strong>${hasOfficialPrice ? `${diff > 0 ? '-' : diff < 0 ? '+' : ''}${formatMoney(Math.abs(diff))}` : '—'}</strong></div>
+          </div>
+          ${official.boosts?.length ? `<div class="radar-boosts">${official.boosts.map((b) => `
+            <div class="radar-boost ${b.status === 'boosted' ? 'is-on' : b.status === 'opportunity' ? 'is-opportunity' : ''}">
+              <span>${escapeHtml(b.description || b.id)}</span><strong>${b.status === 'boosted' ? 'Ativo' : b.status === 'opportunity' ? 'Oportunidade' : 'Sem ganho adicional'}</strong>
+            </div>`).join('')}</div>` : ''}
+        </section>`;
+    } else {
+      officialHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Competição oficial do catálogo</div>
+          <div class="check-row check-info">Este anúncio não retornou <strong>price_to_win</strong>. O Radar abaixo usa preços observados em anúncios similares e não chama isso de “preço para ganhar”.</div>
+        </section>`;
+    }
+
+    const marketHtml = competitors.length ? `
+      <section class="radar-section">
+        <div class="radar-section-title">Referência de mercado</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Média</span><strong>${formatMoney(market.avgPrice)}</strong></div>
+          <div><span>Mediana</span><strong>${formatMoney(market.medianPrice)}</strong></div>
+          <div><span>Menor</span><strong>${formatMoney(market.minPrice)}</strong></div>
+          <div><span>Frete grátis</span><strong>${Number(market.freeShippingRate || 0)}%</strong></div>
+        </div>
+        <p class="radar-note">Na amostra de ${competitors.length} anúncios, ${market.cheaperCount || 0} estão abaixo do seu preço. A busca é uma referência de mercado; produtos podem ter variações de marca, kit, condição e características.</p>
+        <div class="radar-competitors">
+          ${competitors.slice(0, 6).map((c) => `
+            <div class="radar-competitor">
+              <div><strong>${escapeHtml(c.title)}</strong><span>${c.free_shipping ? 'Frete grátis' : 'Frete não identificado'} · ${Number(c.sold_quantity || 0).toLocaleString('pt-BR')} vendidos*</span></div>
+              <strong>${formatMoney(c.price)}</strong>
+            </div>`).join('')}
+        </div>
+        <p class="radar-footnote">*Quantidade exibida pela busca pública pode ser referencial.</p>
+      </section>` : `
+      <section class="radar-section"><div class="radar-section-title">Referência de mercado</div><div class="check-row check-alerta">Não encontrei uma amostra comparável suficiente para este anúncio.</div></section>`;
+
+    let marginHtml = '';
+    if (productCost === null) {
+      marginHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Proteção de margem</div>
+          <div class="check-row check-alerta">Informe o custo do produto no card do anúncio para o Radar calcular se o preço sugerido mantém lucro e margem.</div>
+        </section>`;
+    } else {
+      marginHtml = `
+        <section class="radar-section">
+          <div class="radar-section-title">Proteção de margem</div>
+          ${renderRadarMargin('No preço atual', data.margin?.current)}
+          ${renderRadarMargin('No preço para ganhar', data.margin?.atPriceToWin)}
+          ${data.margin?.atPriceToWin && data.margin.atPriceToWin.netProfit < 0 ? '<div class="radar-warning">Não reduza para o preço sugerido sem rever custos: a simulação ficaria no prejuízo.</div>' : ''}
+          <p class="radar-note">Simulação usa custo informado no card, comissão de ${Number(globalSettings.commission).toFixed(1)}% e imposto de ${Number(globalSettings.tax).toFixed(1)}%. Frete, tarifa fixa e Ads estão em zero nesta simulação rápida.</p>
+        </section>`;
+    }
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.item.title)}</h2>
+      <p class="radar-subtitle">Radar de Concorrência · ${escapeHtml(data.item.id)}</p>
+      ${officialHtml}
+      ${marketHtml}
+      ${marginHtml}
+    `;
+  } catch (err) {
+    body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">Erro ao consultar o Radar. Veja o console para detalhes.</p>`;
+    console.error(err);
+  }
+}
+
+function reviewStars(rate) {
+  const value = Math.max(0, Math.min(5, Math.round(Number(rate || 0))));
+  return `${'★'.repeat(value)}${'☆'.repeat(5 - value)}`;
+}
+
+
+function fmtPct(value) {
+  return value == null ? '—' : `${Number(value).toFixed(1)}%`;
+}
+function fmtMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+}
+function trendArrow(value) {
+  if (value == null) return '—';
+  if (value > 0) return `↑ ${Math.abs(Number(value)).toFixed(1)}%`;
+  if (value < 0) return `↓ ${Math.abs(Number(value)).toFixed(1)}%`;
+  return '0%';
+}
+
+async function openConversionEngine(itemId) {
+  const modal = document.getElementById('modal');
+  const body = document.getElementById('modal-body');
+  modal.hidden = false;
+  body.innerHTML = '<p>Calculando conversão, vendas e tendência dos últimos 60 dias…</p>';
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/conversion-engine`);
+    const data = await res.json();
+    if (!res.ok) {
+      body.innerHTML = `<h2>Motor de Conversão</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao calcular conversão.')}</p>`;
+      return;
+    }
+
+    const d = data.decision || {};
+    const c = data.current || {};
+    const p = data.previous || {};
+    const t = data.trend || {};
+    const comp = data.competition || {};
+    const signalHtml = (d.signals || []).map((x) => `<div class="check-row check-alerta">${escapeHtml(x)}</div>`).join('');
+    const actionsHtml = (d.actions || []).map((x, i) => `<div class="check-row"><strong>${i + 1}.</strong> ${escapeHtml(x)}</div>`).join('');
+    const cls = d.classification === 'ESCALAR' ? 'radar-good' : d.classification === 'OTIMIZAR' ? 'radar-bad' : 'radar-neutral';
+
+    body.innerHTML = `
+      <h2>Motor de Conversão</h2>
+      <p class="radar-subtitle">${escapeHtml(data.item?.title || itemId)}</p>
+      <section class="radar-section">
+        <div class="radar-section-title">Decisão Visium</div>
+        <div class="radar-status ${cls}">${escapeHtml(d.classification || 'OBSERVAR')} · prioridade ${escapeHtml(d.priority || '—')}</div>
+        ${signalHtml || '<div class="check-row">Sem sinal forte no período.</div>'}
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Últimos 30 dias</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Visitas</span><strong>${Number(c.visits || 0)}</strong></div>
+          <div><span>Unidades</span><strong>${Number(c.units || 0)}</strong></div>
+          <div><span>Conversão estimada</span><strong>${fmtPct(c.conversion)}</strong></div>
+          <div><span>Faturamento</span><strong>${fmtMoney(c.revenue)}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Comparação com 30 dias anteriores</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Conversão anterior</span><strong>${fmtPct(p.conversion)}</strong></div>
+          <div><span>Variação conversão</span><strong>${trendArrow(t.conversionChangePct)}</strong></div>
+          <div><span>Variação visitas</span><strong>${trendArrow(t.visitsChangePct)}</strong></div>
+          <div><span>Variação unidades</span><strong>${trendArrow(t.unitsChangePct)}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Competitividade</div>
+        <div class="radar-metrics">
+          <div><span>Seu preço</span><strong>${fmtMoney(data.item?.price)}</strong></div>
+          <div><span>Preço para ganhar</span><strong>${comp.priceToWin != null ? fmtMoney(comp.priceToWin) : 'Sem dado oficial'}</strong></div>
+          <div><span>Status catálogo</span><strong>${escapeHtml(comp.status || '—')}</strong></div>
+        </div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Próxima ação</div>
+        ${actionsHtml || '<div class="check-row">Continue monitorando o anúncio.</div>'}
+        <p class="radar-note">${escapeHtml(d.note || '')}</p>
+      </section>`;
+  } catch (err) {
+    body.innerHTML = '<h2>Motor de Conversão</h2><p class="check-critico">Erro de conexão ao calcular a conversão.</p>';
+  }
+}
+
+async function openReviews(itemId) {
+  const modal = document.getElementById('diagnosis-modal');
+  const body = document.getElementById('modal-body');
+  body.innerHTML = `<h2>Avaliações do produto</h2><p style="color:var(--text-dim);font-size:14px">Consultando opiniões reais de compradores no Mercado Livre…</p>`;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/reviews?limit=10`);
+    if (res.status === 401) { window.location.href = '/'; return; }
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `<h2>Avaliações do produto</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao consultar avaliações.')}</p>`;
+      return;
+    }
+
+    const summary = data.summary || {};
+    const dist = summary.distribution || {};
+    const reviews = data.reviews || [];
+    const distributionHtml = [5,4,3,2,1].map((star) => {
+      const count = Number(dist[star] || 0);
+      const total = Math.max(1, Object.values(dist).reduce((sum, n) => sum + Number(n || 0), 0));
+      const pct = Math.round((count / total) * 100);
+      return `<div style="display:grid;grid-template-columns:34px 1fr 55px;gap:8px;align-items:center;margin:5px 0;font-size:12px"><span>${star}★</span><div style="height:7px;background:var(--surface-alt);border-radius:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--primary)"></div></div><span style="color:var(--text-dim)">${count}</span></div>`;
+    }).join('');
+
+    const reviewsHtml = reviews.length ? reviews.map((r) => `
+      <div class="check-row check-info" style="display:block">
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:5px"><strong style="color:var(--primary)">${reviewStars(r.rate)}</strong><span style="font-size:11px;color:var(--text-dim)">${r.dateCreated ? new Date(r.dateCreated).toLocaleDateString('pt-BR') : ''}</span></div>
+        ${r.title ? `<strong>${escapeHtml(r.title)}</strong>` : ''}
+        ${r.content ? `<div style="margin-top:4px;line-height:1.45">${escapeHtml(r.content)}</div>` : '<div style="margin-top:4px;color:var(--text-dim)">Avaliação sem comentário escrito.</div>'}
+        ${r.variation?.length ? `<div style="margin-top:5px;font-size:11px;color:var(--text-dim)">${escapeHtml(r.variation.join(' · '))}</div>` : ''}
+        ${(r.likes || r.mediaCount) ? `<div style="margin-top:5px;font-size:11px;color:var(--text-dim)">${r.likes ? `${Number(r.likes).toLocaleString('pt-BR')} acharam útil` : ''}${r.likes && r.mediaCount ? ' · ' : ''}${r.mediaCount ? `${r.mediaCount} mídia(s)` : ''}</div>` : ''}
+      </div>`).join('') : '<div class="check-row check-alerta">Este produto ainda não possui avaliações disponíveis pela API.</div>';
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.item?.title || 'Avaliações')}</h2>
+      <p class="radar-subtitle">Voz do Cliente · ${escapeHtml(data.item?.id || itemId)}</p>
+      <section class="radar-section">
+        <div class="radar-section-title">Satisfação do produto</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Nota média</span><strong>${summary.ratingAverage != null ? `${Number(summary.ratingAverage).toFixed(1)} ★` : '—'}</strong></div>
+          <div><span>Avaliações</span><strong>${Number(summary.total || 0).toLocaleString('pt-BR')}</strong></div>
+          <div><span>Positivas (4–5★)</span><strong>${summary.positiveRate != null ? `${summary.positiveRate}%` : '—'}</strong></div>
+          <div><span>Críticas (1–2★)</span><strong>${summary.criticalRate != null ? `${summary.criticalRate}%` : '—'}</strong></div>
+        </div>
+        <div style="margin-top:12px">${distributionHtml}</div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Comentários recentes</div>
+        ${reviewsHtml}
+      </section>`;
+  } catch (err) {
+    body.innerHTML = `<h2>Avaliações do produto</h2><p class="check-critico">Erro ao consultar avaliações. Veja o console para detalhes.</p>`;
+    console.error(err);
+  }
 }
 
 async function openAIAnalysis(itemId) {
@@ -437,8 +975,168 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-loadItems();
-loadCategories();
+(async function initVisiumDashboard() {
+  await Promise.all([loadPlatformActions(), loadMarketplaceAccounts()]);
+  await loadOverview();
+  if (activeMarketplacePlatform === 'mercadolivre') {
+    loadItems();
+    loadCategories();
+  }
+})();
+
+// ---------- Financeiro ----------
+
+document.getElementById('financials-days').addEventListener('change', loadFinancials);
+
+async function loadFinancials() {
+  const statusEl = document.getElementById('financials-status');
+  const contentEl = document.getElementById('financials-content');
+  const days = document.getElementById('financials-days').value;
+
+  statusEl.hidden = false;
+  statusEl.textContent = 'Carregando dados financeiros…';
+  contentEl.hidden = true;
+
+  try {
+    const res = await fetch(`/api/financials?days=${days}`);
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    if (data.error) {
+      statusEl.textContent = data.error;
+      return;
+    }
+
+    document.getElementById('fin-revenue').textContent = `R$ ${data.totalRevenue.toFixed(2)}`;
+    document.getElementById('fin-orders').textContent = data.orderCount;
+    document.getElementById('fin-ticket').textContent = `R$ ${data.averageTicket.toFixed(2)}`;
+
+    const topItemsEl = document.getElementById('fin-top-items');
+    if (data.topItems.length === 0) {
+      topItemsEl.innerHTML = '<p style="color:var(--text-dim);font-size:14px">Nenhuma venda paga nesse período.</p>';
+    } else {
+      topItemsEl.innerHTML = data.topItems
+        .map(
+          (item, i) => `
+          <div class="row" style="padding:10px 0">
+            <span>${i + 1}. ${escapeHtml(item.title)} <span style="color:var(--text-dim)">(${item.units} un.)</span></span>
+            <span style="color:var(--primary);font-weight:700">R$ ${item.revenue.toFixed(2)}</span>
+          </div>`
+        )
+        .join('');
+    }
+
+    statusEl.hidden = true;
+    contentEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = 'Erro ao carregar dados financeiros. Veja o console para detalhes.';
+    console.error(err);
+  }
+}
+
+// ---------- Perguntas pendentes do Mercado Livre ----------
+
+async function loadQuestions() {
+  const statusEl = document.getElementById('questions-status');
+  const listEl = document.getElementById('questions-list');
+
+  statusEl.hidden = false;
+  statusEl.textContent = 'Carregando perguntas…';
+  listEl.hidden = true;
+
+  try {
+    const res = await fetch('/api/questions');
+    if (res.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    const data = await res.json();
+
+    if (!data.questions || data.questions.length === 0) {
+      statusEl.textContent = 'Nenhuma pergunta pendente de resposta. Tudo em dia! 🎉';
+      return;
+    }
+
+    listEl.innerHTML = data.questions
+      .map(
+        (q) => `
+        <div class="calc-form" style="max-width:none;display:block;padding:18px 20px">
+          <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px">
+            ${q.itemThumbnail ? `<img src="${fixThumb(q.itemThumbnail)}" alt="" style="width:48px;height:48px;object-fit:contain;background:#fff;border-radius:4px;flex-shrink:0" />` : ''}
+            <div>
+              <div style="font-size:12px;color:var(--text-dim)">${escapeHtml(q.itemTitle)}</div>
+              <div style="font-size:15px;margin-top:4px">${escapeHtml(q.text)}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" class="answer-input" data-question-id="${q.id}" placeholder="Digite a resposta…" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:3px;font-size:14px" />
+            <button class="link-btn answer-btn" data-question-id="${q.id}" style="width:auto;padding:9px 18px">Responder</button>
+          </div>
+          <p class="answer-feedback" data-question-id="${q.id}" style="font-size:12px;margin-top:6px;display:none"></p>
+        </div>`
+      )
+      .join('');
+
+    listEl.querySelectorAll('.answer-btn').forEach((btn) => {
+      btn.addEventListener('click', () => submitAnswer(btn.dataset.questionId));
+    });
+
+    statusEl.hidden = true;
+    listEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = 'Erro ao carregar perguntas. Veja o console para detalhes.';
+    console.error(err);
+  }
+}
+
+async function submitAnswer(questionId) {
+  const input = document.querySelector(`.answer-input[data-question-id="${questionId}"]`);
+  const btn = document.querySelector(`.answer-btn[data-question-id="${questionId}"]`);
+  const feedback = document.querySelector(`.answer-feedback[data-question-id="${questionId}"]`);
+  const text = input.value.trim();
+
+  if (!text) {
+    input.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+
+  try {
+    const res = await fetch(`/api/questions/${questionId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.ok) {
+      const card = btn.closest('.calc-form');
+      card.style.opacity = '0.4';
+      feedback.style.color = 'var(--primary)';
+      feedback.textContent = 'Resposta enviada!';
+      feedback.style.display = 'block';
+      input.disabled = true;
+      btn.textContent = 'Respondido';
+    } else {
+      feedback.style.color = 'var(--danger)';
+      feedback.textContent = data.error || 'Falha ao enviar.';
+      feedback.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Responder';
+    }
+  } catch (err) {
+    feedback.style.color = 'var(--danger)';
+    feedback.textContent = 'Erro de conexão.';
+    feedback.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Responder';
+  }
+}
 
 // ---------- Explorador de categorias do Mercado Livre ----------
 
@@ -450,11 +1148,31 @@ function formatNumber(n) {
   return Number(n).toLocaleString('pt-BR');
 }
 
-function representationClass(repr) {
-  if (repr === null) return 'repr-low';
-  if (repr >= 40) return 'repr-high';
-  if (repr >= 15) return 'repr-mid';
-  return 'repr-low';
+function representationColor(repr) {
+  if (repr === null) return { bg: 'var(--surface-alt)', bgSoft: 'transparent', text: 'var(--text-dim)' };
+  // Interpola de cinza-azulado (baixa relevância) até verde-neon (alta),
+  // passando por amarelo no meio — degradê continuo em vez de 3 faixas fixas.
+  const pct = Math.max(0, Math.min(100, repr)) / 100;
+  let r, g, b;
+  if (pct < 0.5) {
+    // cinza-azulado (#4a5568) -> amarelo (#e0b13c)
+    const t = pct / 0.5;
+    r = Math.round(74 + t * (224 - 74));
+    g = Math.round(85 + t * (177 - 85));
+    b = Math.round(104 + t * (60 - 104));
+  } else {
+    // amarelo (#e0b13c) -> verde-neon (#c6ff00)
+    const t = (pct - 0.5) / 0.5;
+    r = Math.round(224 + t * (198 - 224));
+    g = Math.round(177 + t * (255 - 177));
+    b = Math.round(60 + t * (0 - 60));
+  }
+  const bg = `rgb(${r},${g},${b})`;
+  const bgSoft = `rgba(${r},${g},${b},0.16)`;
+  // Texto escuro em fundos claros/verdes, texto claro em fundos escuros/cinza
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const text = luminance > 0.55 ? '#0a0a0a' : '#f5f5f5';
+  return { bg, bgSoft, text };
 }
 
 async function loadExploreCategories(parentId) {
@@ -512,14 +1230,19 @@ async function loadExploreCategories(parentId) {
     }
 
     gridEl.innerHTML = data.children
-      .map(
-        (cat) => `
-        <button class="explore-card" data-id="${cat.id}">
+      .map((cat) => {
+        const { bg, bgSoft, text } = representationColor(cat.representation);
+        const bgStyle =
+          cat.representation !== null
+            ? `background: linear-gradient(135deg, ${bgSoft} 0%, var(--surface) 55%); border-left:4px solid ${bg};`
+            : `border-left:4px solid ${bg};`;
+        return `
+        <button class="explore-card" data-id="${cat.id}" style="${bgStyle}">
           <span class="cat-name">${escapeHtml(cat.name)}</span>
           <span class="cat-total">${formatNumber(cat.total)} produtos</span>
-          ${cat.representation !== null ? `<span class="cat-representation ${representationClass(cat.representation)}">${cat.representation}%</span>` : ''}
-        </button>`
-      )
+          ${cat.representation !== null ? `<span class="cat-representation" style="background:${bg};color:${text}">${cat.representation}%</span>` : ''}
+        </button>`;
+      })
       .join('');
 
     gridEl.querySelectorAll('.explore-card').forEach((card) => {
