@@ -793,7 +793,7 @@ h1, h2, h3 {
 
 /* ---------- Identidade Visium Seller ---------- */
 .topbar {
-  min-height: 72px;
+  min-height: 76px;
   gap: 18px;
 }
 
@@ -801,19 +801,19 @@ h1, h2, h3 {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  width: 150px;
-  height: 52px;
-  overflow: hidden;
+  width: 205px;
+  height: 58px;
+  overflow: visible;
   text-decoration: none;
 }
 
 .brand-logo img {
   display: block;
-  width: 150px;
+  width: 205px;
   height: auto;
+  max-height: 58px;
   object-fit: contain;
   object-position: left center;
-  filter: drop-shadow(0 0 8px rgba(198,255,0,0.08));
 }
 
 .topbar nav {
@@ -830,13 +830,17 @@ h1, h2, h3 {
     flex-direction: column;
   }
 
+  .brand-logo,
+  .brand-logo img {
+    width: 185px;
+  }
+
   .brand-logo {
-    width: 138px;
-    height: 48px;
+    height: 52px;
   }
 
   .brand-logo img {
-    width: 138px;
+    max-height: 52px;
   }
 
   .topbar nav {
@@ -851,12 +855,16 @@ h1, h2, h3 {
 }
 
 @media (max-width: 640px) {
+  .brand-logo,
+  .brand-logo img {
+    width: 165px;
+  }
+
   .brand-logo {
-    width: 126px;
-    height: 44px;
+    height: 48px;
   }
 
   .brand-logo img {
-    width: 126px;
+    max-height: 48px;
   }
 }
