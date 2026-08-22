@@ -103,9 +103,13 @@ async function loadOverview() {
     document.getElementById('unified-products').innerHTML = products.length ? products.map((p) => `
       <div class="unified-product">
         ${p.thumbnail ? `<img src="${escapeHtml(fixThumb(p.thumbnail))}" alt="">` : '<div></div>'}
-        <div><strong>${escapeHtml(p.title)}</strong><div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')}</div></div>
+        <div>
+          <strong>${escapeHtml(p.title)}</strong>
+          <div class="meta">${escapeHtml(p.account_name || '')} · estoque ${Number(p.stock || 0).toLocaleString('pt-BR')} · preço ${formatMoney(p.price || 0)}</div>
+          <div class="meta"><strong>${Number(p.units_30d || 0).toLocaleString('pt-BR')} un.</strong> nos últimos 30 dias · <strong>${formatMoney(p.revenue_30d || 0)}</strong> faturados</div>
+        </div>
         <span class="platform-pill">${escapeHtml(platformLabel(p.platform))}</span>
-        <strong>${formatMoney(p.price || 0)}</strong>
+        <strong>${formatMoney(p.revenue_30d || 0)}</strong>
       </div>`).join('') : '<div class="status">Nenhum produto sincronizado ainda. Use “Sincronizar conta ativa”.</div>';
     status.hidden = true;
     content.hidden = false;
@@ -493,6 +497,7 @@ async function loadItems(isFirstPage = true) {
             <div class="item-card-profit-wrap">${renderProfit(item.price, savedCost, globalSettings.commission, globalSettings.tax)}</div>
             <div class="item-card-footer item-card-footer-actions">
               <button class="link-btn radar-btn" data-radar-id="${item.id}">Radar</button>
+              <button class="link-btn reviews-btn" data-reviews-id="${item.id}">Avaliações</button>
               <button class="link-btn" data-id="${item.id}">Diagnóstico</button>
             </div>
           </div>
@@ -512,6 +517,14 @@ async function loadItems(isFirstPage = true) {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         openCompetitionRadar(btn.dataset.radarId);
+      });
+    });
+
+    grid.querySelectorAll('.reviews-btn:not([data-bound])').forEach((btn) => {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReviews(btn.dataset.reviewsId);
       });
     });
 
@@ -719,6 +732,68 @@ async function openCompetitionRadar(itemId) {
     `;
   } catch (err) {
     body.innerHTML = `<h2>Radar de Concorrência</h2><p class="check-critico">Erro ao consultar o Radar. Veja o console para detalhes.</p>`;
+    console.error(err);
+  }
+}
+
+function reviewStars(rate) {
+  const value = Math.max(0, Math.min(5, Math.round(Number(rate || 0))));
+  return `${'★'.repeat(value)}${'☆'.repeat(5 - value)}`;
+}
+
+async function openReviews(itemId) {
+  const modal = document.getElementById('diagnosis-modal');
+  const body = document.getElementById('modal-body');
+  body.innerHTML = `<h2>Avaliações do produto</h2><p style="color:var(--text-dim);font-size:14px">Consultando opiniões reais de compradores no Mercado Livre…</p>`;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(itemId)}/reviews?limit=10`);
+    if (res.status === 401) { window.location.href = '/'; return; }
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `<h2>Avaliações do produto</h2><p class="check-critico">${escapeHtml(data.error || 'Falha ao consultar avaliações.')}</p>`;
+      return;
+    }
+
+    const summary = data.summary || {};
+    const dist = summary.distribution || {};
+    const reviews = data.reviews || [];
+    const distributionHtml = [5,4,3,2,1].map((star) => {
+      const count = Number(dist[star] || 0);
+      const total = Math.max(1, Object.values(dist).reduce((sum, n) => sum + Number(n || 0), 0));
+      const pct = Math.round((count / total) * 100);
+      return `<div style="display:grid;grid-template-columns:34px 1fr 55px;gap:8px;align-items:center;margin:5px 0;font-size:12px"><span>${star}★</span><div style="height:7px;background:var(--surface-alt);border-radius:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--primary)"></div></div><span style="color:var(--text-dim)">${count}</span></div>`;
+    }).join('');
+
+    const reviewsHtml = reviews.length ? reviews.map((r) => `
+      <div class="check-row check-info" style="display:block">
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:5px"><strong style="color:var(--primary)">${reviewStars(r.rate)}</strong><span style="font-size:11px;color:var(--text-dim)">${r.dateCreated ? new Date(r.dateCreated).toLocaleDateString('pt-BR') : ''}</span></div>
+        ${r.title ? `<strong>${escapeHtml(r.title)}</strong>` : ''}
+        ${r.content ? `<div style="margin-top:4px;line-height:1.45">${escapeHtml(r.content)}</div>` : '<div style="margin-top:4px;color:var(--text-dim)">Avaliação sem comentário escrito.</div>'}
+        ${r.variation?.length ? `<div style="margin-top:5px;font-size:11px;color:var(--text-dim)">${escapeHtml(r.variation.join(' · '))}</div>` : ''}
+        ${(r.likes || r.mediaCount) ? `<div style="margin-top:5px;font-size:11px;color:var(--text-dim)">${r.likes ? `${Number(r.likes).toLocaleString('pt-BR')} acharam útil` : ''}${r.likes && r.mediaCount ? ' · ' : ''}${r.mediaCount ? `${r.mediaCount} mídia(s)` : ''}</div>` : ''}
+      </div>`).join('') : '<div class="check-row check-alerta">Este produto ainda não possui avaliações disponíveis pela API.</div>';
+
+    body.innerHTML = `
+      <h2>${escapeHtml(data.item?.title || 'Avaliações')}</h2>
+      <p class="radar-subtitle">Voz do Cliente · ${escapeHtml(data.item?.id || itemId)}</p>
+      <section class="radar-section">
+        <div class="radar-section-title">Satisfação do produto</div>
+        <div class="radar-metrics radar-metrics-4">
+          <div><span>Nota média</span><strong>${summary.ratingAverage != null ? `${Number(summary.ratingAverage).toFixed(1)} ★` : '—'}</strong></div>
+          <div><span>Avaliações</span><strong>${Number(summary.total || 0).toLocaleString('pt-BR')}</strong></div>
+          <div><span>Positivas (4–5★)</span><strong>${summary.positiveRate != null ? `${summary.positiveRate}%` : '—'}</strong></div>
+          <div><span>Críticas (1–2★)</span><strong>${summary.criticalRate != null ? `${summary.criticalRate}%` : '—'}</strong></div>
+        </div>
+        <div style="margin-top:12px">${distributionHtml}</div>
+      </section>
+      <section class="radar-section">
+        <div class="radar-section-title">Comentários recentes</div>
+        ${reviewsHtml}
+      </section>`;
+  } catch (err) {
+    body.innerHTML = `<h2>Avaliações do produto</h2><p class="check-critico">Erro ao consultar avaliações. Veja o console para detalhes.</p>`;
     console.error(err);
   }
 }

@@ -411,6 +411,70 @@ router.post('/items/:id/competition-radar', requireAuth, async (req, res) => {
   }
 });
 
+// Voz do Cliente: avaliações reais do produto via API oficial de Reviews.
+// É leitura apenas; serve para descobrir satisfação, distribuição de estrelas e
+// comentários recentes sem depender de IA.
+router.get('/items/:id/reviews', requireAuth, async (req, res) => {
+  try {
+    const { access_token } = req.session.ml;
+    const [item] = await mlClient.getItemsDetails([req.params.id], access_token);
+    if (!item) return res.status(404).json({ error: 'Anúncio não encontrado.' });
+
+    const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
+    let data;
+    try {
+      data = await mlClient.getItemReviews(item.id, access_token, {
+        limit,
+        catalogProductId: item.catalog_product_id || null
+      });
+    } catch (err) {
+      if (err.response?.status === 404) {
+        data = { paging: { total: 0 }, reviews: [], rating_average: null, rating_levels: {} };
+      } else {
+        throw err;
+      }
+    }
+
+    const levels = data.rating_levels || {};
+    const distribution = {
+      1: Number(levels.one_star || 0),
+      2: Number(levels.two_star || 0),
+      3: Number(levels.three_star || 0),
+      4: Number(levels.four_star || 0),
+      5: Number(levels.five_star || 0)
+    };
+    const ratedTotal = Object.values(distribution).reduce((sum, n) => sum + n, 0);
+    const positiveRate = ratedTotal ? Number((((distribution[4] + distribution[5]) / ratedTotal) * 100).toFixed(1)) : null;
+    const criticalRate = ratedTotal ? Number((((distribution[1] + distribution[2]) / ratedTotal) * 100).toFixed(1)) : null;
+
+    res.json({
+      item: { id: item.id, title: item.title, catalog_product_id: item.catalog_product_id || null },
+      summary: {
+        total: Number(data.paging?.total || ratedTotal || 0),
+        ratingAverage: data.rating_average != null ? Number(data.rating_average) : null,
+        distribution,
+        positiveRate,
+        criticalRate
+      },
+      reviews: (data.reviews || []).map((review) => ({
+        id: review.id,
+        rate: Number(review.rate || 0),
+        title: review.title || '',
+        content: review.content || '',
+        likes: Number(review.likes || 0),
+        dislikes: Number(review.dislikes || 0),
+        dateCreated: review.date_created || null,
+        buyingDate: review.buying_date || null,
+        mediaCount: Array.isArray(review.media) ? review.media.length : 0,
+        variation: (review.attributes_variation || []).map((a) => `${a.attribute_name}: ${a.value_name}`).filter(Boolean)
+      }))
+    });
+  } catch (err) {
+    console.error('[api/items/:id/reviews]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao consultar as avaliações deste produto.' });
+  }
+});
+
 router.get('/items/:id/diagnosis', requireAuth, async (req, res) => {
   try {
     const { access_token } = req.session.ml;

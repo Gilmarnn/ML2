@@ -69,7 +69,7 @@ async function syncProducts(userId, accountId) {
   if (!account) throw new Error('Conta de marketplace não encontrada.');
   const adapter = getAdapter(account.platform);
   account = await ensureFreshAccount(account, adapter);
-  if (!adapter?.api?.getProducts) throw new Error(`Produtos ainda não são suportados por ${account.platform}.`);
+  if (account.platform !== 'mercadolivre' && !adapter?.api?.getProducts) throw new Error(`Produtos ainda não são suportados por ${account.platform}.`);
   const logId = await startLog(account.id, 'products');
   try {
     let result;

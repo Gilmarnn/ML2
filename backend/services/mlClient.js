@@ -198,6 +198,19 @@ async function getPriceToWin(itemId, accessToken) {
   }
 }
 
+
+/**
+ * Avaliações/opiniões do anúncio. Endpoint oficial de Reviews do Mercado Livre.
+ * Retorna média de estrelas, distribuição e comentários recentes.
+ */
+async function getItemReviews(itemId, accessToken, { offset = 0, limit = 10, catalogProductId = null } = {}) {
+  const api = client(accessToken);
+  const params = { offset: Math.max(0, Number(offset) || 0), limit: Math.min(20, Math.max(1, Number(limit) || 10)) };
+  if (catalogProductId) params.catalog_product_id = catalogProductId;
+  const { data } = await api.get(`/reviews/item/${itemId}`, { params });
+  return data;
+}
+
 async function getOrders(userId, accessToken, { fromDate, toDate, maxOrders = 300 } = {}) {
   const api = client(accessToken);
   const orders = [];
@@ -238,5 +251,6 @@ module.exports = {
   getUnansweredQuestions,
   answerQuestion,
   getOrders,
-  getPriceToWin
+  getPriceToWin,
+  getItemReviews
 };
